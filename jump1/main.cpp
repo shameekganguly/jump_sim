@@ -50,14 +50,40 @@ int main (int argc, char** argv) {
 	auto robot = new Model::ModelInterface(robot_fname, Model::rbdl, Model::urdf, false);
 
 	// set initial condition
-	// robot->_q << 125.9/180.0*M_PI,
-	// 			39.2/180.0*M_PI,
-	// 			-49.2/180.0*M_PI,
-	// 			70.0/180.0*M_PI,
-	// 			-62.4/180.0*M_PI,
-	// 			80.2/180.0*M_PI,
-	// 			187.2/180.0*M_PI;
-	// robot->updateModel();
+	robot->_q << 0.0, //0 floating_base_px
+				0.0,	//1 floating_base_py
+				0.0,	//2 floating_base_pz
+				0.0/180.0*M_PI, //3 floating_base_rx
+				0.0/180.0*M_PI, //4 floating_base_ry
+				0.0/180.0*M_PI,	//5 floating_base_rz
+				0.0/180.0*M_PI,	//6 right thigh adduction
+				0.0/180.0*M_PI,	//7 right thigh pitch
+				0/180.0*M_PI,	//8 right knee roll
+				0/180.0*M_PI,	//9 right knee pitch
+				0/180.0*M_PI,	//10 right ankle adduction
+				0/180.0*M_PI,	//11 right ankle pitch - axis incorrect
+				0/180.0*M_PI,	//12 trunk roll
+				0/180.0*M_PI,	//13 right shoulder pitch
+				0/180.0*M_PI,	//14 right shoulder adduction
+				0/180.0*M_PI,	//15 right shoulder roll
+				0/180.0*M_PI,	//16 right elbow pitch
+				0/180.0*M_PI,	//17 right elbow roll
+				0/180.0*M_PI,	//18 right hand adduction - axis incorrect
+				0/180.0*M_PI,	//19 left shoulder pitch
+				0/180.0*M_PI,	//20 left shoulder adduction
+				0/180.0*M_PI,	//21 left shoulder roll
+				0/180.0*M_PI,	//22 left elbow pitch
+				0/180.0*M_PI,	//23 left elbow roll
+				0/180.0*M_PI,	//24 left hand adduction - axis incorrect
+				0/180.0*M_PI,	//25 neck roll
+				0/180.0*M_PI,	//26 neck pitch
+				0/180.0*M_PI,	//27 left thigh adduction
+				0/180.0*M_PI,	//28 left thigh pitch
+				0/180.0*M_PI,	//29 left knee roll
+				0/180.0*M_PI,	//30 left knee pitch
+				0/180.0*M_PI,	//31 left ankle adduction
+				0/180.0*M_PI;	//32 left ankle pitch - axis incorrect
+	robot->updateModel();
 	// Eigen::Affine3d ee_trans;
 	// robot->transform(ee_trans, ee_link_name);
 	// cout << ee_trans.translation().transpose() << endl;
