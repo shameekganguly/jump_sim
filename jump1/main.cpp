@@ -43,8 +43,8 @@ int main (int argc, char** argv) {
 	cout << "Loading URDF world model file: " << world_fname << endl;
 
 	// load graphics scene
-	auto graphics = new Graphics::ChaiGraphics(world_fname, Graphics::chai, Graphics::urdf, false);
-	graphics->_world->setBackgroundColor();
+	auto graphics = new Graphics::ChaiGraphics(world_fname, Graphics::urdf, false);
+	graphics->_world->setBackgroundColor(0.7, 0.7, 0.5);
 
 	// load robots
 	auto robot = new Model::ModelInterface(robot_fname, Model::rbdl, Model::urdf, false);
