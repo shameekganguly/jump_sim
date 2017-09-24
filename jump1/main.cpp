@@ -12,6 +12,7 @@ Date: 4/9/17
 
 #include "model/ModelInterface.h"
 #include "graphics/ChaiGraphics.h"
+#include "simulation/Sai2Simulation.h"
 
 #include "timer/LoopTimer.h"
 
@@ -28,9 +29,13 @@ const string camera_name = "camera_side";
 // const string camera_name = "camera_top";
 // const string ee_link_name = "link6";
 
+// global variables
+Eigen::VectorXd q_home;
+
 // simulation loop
 bool fSimulationRunning = false;
-void simulation(Model::ModelInterface* robot);
+void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
+void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
 
 // initialize window manager
 GLFWwindow* glfwInitialize();
@@ -51,8 +56,16 @@ int main (int argc, char** argv) {
 	// load robots
 	auto robot = new Model::ModelInterface(robot_fname, Model::rbdl, Model::urdf, false);
 
+	// load simulation world
+	auto sim = new Simulation::Sai2Simulation(world_fname, Simulation::urdf, false);
+	sim->setCollisionRestitution(0.0);
+    // set co-efficient of friction also to zero for now as this causes jitter
+    sim->setCoeffFrictionStatic(1.0);
+    sim->setCoeffFrictionDynamic(1.0);
+
 	// set initial condition
-	robot->_q << 0.0, //0 floating_base_px
+	q_home.setZero(robot->dof());
+	q_home << 0.0, //0 floating_base_px
 				0.0,	//1 floating_base_py
 				-0.25,	//2 floating_base_pz
 				0.0/180.0*M_PI, //3 floating_base_rx
@@ -78,13 +91,15 @@ int main (int argc, char** argv) {
 				30/180.0*M_PI,	//23 left elbow roll
 				0/180.0*M_PI,	//24 left hand adduction - axis incorrect
 				0/180.0*M_PI,	//25 neck roll
-				0/180.0*M_PI,	//26 neck pitch
+				0/180.0*M_PI,	//26 neck pitch - axis incorrect
 				30/180.0*M_PI,	//27 left thigh adduction
 				-60/180.0*M_PI,	//28 left thigh pitch
 				15/180.0*M_PI,	//29 left knee roll
 				90/180.0*M_PI,	//30 left knee pitch
 				-15/180.0*M_PI,	//31 left ankle adduction
 				-15/180.0*M_PI;	//32 left ankle pitch - axis incorrect
+	robot->_q = q_home;
+	sim->setJointPositions(robot_name, robot->_q);
 	robot->updateModel();
 	// Eigen::Affine3d ee_trans;
 	// robot->transform(ee_trans, ee_link_name);
@@ -98,7 +113,10 @@ int main (int argc, char** argv) {
 	glfwSetKeyCallback(window, keySelect);
 
 	// start the simulation
-	thread sim_thread(simulation, robot);
+	thread sim_thread(simulation, robot, sim);
+
+	// next start the control thread
+	thread ctrl_thread(control, robot, sim);
 	
     // while window is open:
     while (!glfwWindowShouldClose(window)) {
@@ -120,6 +138,7 @@ int main (int argc, char** argv) {
 	// stop simulation
 	fSimulationRunning = false;
 	sim_thread.join();
+	ctrl_thread.join();
 
     // destroy context
     glfwDestroyWindow(window);
@@ -131,36 +150,73 @@ int main (int argc, char** argv) {
 }
 
 //------------------------------------------------------------------------------
-void simulation(Model::ModelInterface* robot) {
+void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
+	// create a timer
+	LoopTimer timer;
+	timer.initializeTimer();
+	timer.setLoopFrequency(200); //200Hz timer
+	double last_time = timer.elapsedTime(); //secs
+
+	// cache variables
+	bool fTimerDidSleep = true;
+	Eigen::VectorXd tau = Eigen::VectorXd::Zero(robot->dof());
+	Eigen::VectorXd gj;
+
+	// gains
+	double kpx = 40.0; // operational space kp
+	double kvx = 10.0; // operational space kv
+	double kpj = 70.0; // joint space kp
+	double kvj = 30.0; // joint space kv
+
+	while (fSimulationRunning) { //automatically set to false when simulation is quit
+		fTimerDidSleep = timer.waitForNextLoop();
+
+		// update time
+		double curr_time = timer.elapsedTime();
+		double loop_dt = curr_time - last_time;
+
+		// read joint positions, velocities, update model
+		sim->getJointPositions(robot_name, robot->_q);
+		sim->getJointVelocities(robot_name, robot->_dq);
+		robot->updateModel();
+
+		tau = robot->_M * (-kpj*(robot->_q - q_home) - kvj*(robot->_dq));
+		robot->gravityVector(gj, Eigen::Vector3d(0.0, 0.0, -9.8));
+		tau += gj;
+		// tau = robot->_M * (- kvj*(robot->_dq));
+
+		//
+		tau.head(6).setZero();
+		sim->setJointTorques(robot_name, tau);
+		// -------------------------------------------
+
+		// update last time
+		last_time = curr_time;
+	}
+}
+
+//------------------------------------------------------------------------------
+void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	fSimulationRunning = true;
 
 	// create a timer
 	LoopTimer timer;
 	timer.initializeTimer();
-	timer.setLoopFrequency(500); //500Hz timer
+	timer.setLoopFrequency(1000); //1kHz timer
 	double last_time = timer.elapsedTime(); //secs
 
 	bool fTimerDidSleep = true;
 	while (fSimulationRunning) {
 		fTimerDidSleep = timer.waitForNextLoop();
 
-		// integrate joint velocity to joint positions
+		// integrate forward
 		double curr_time = timer.elapsedTime();
 		double loop_dt = curr_time - last_time; 
-		robot->_q += robot->_dq*loop_dt;
+		sim->integrate(loop_dt);
 
 		// if (!fTimerDidSleep) {
 		// 	cout << "Warning: timer underflow! dt: " << loop_dt << "\n";
 		// }
-
-		// update kinematic models
-		robot->updateModel();
-
-		// ------------------------------------
-		// FILL ME IN: set new joint velocities
-		robot->_dq = Eigen::VectorXd::Zero(robot->dof());
-
-		// ------------------------------------
 
 		// update last time
 		last_time = curr_time;
