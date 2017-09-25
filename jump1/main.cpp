@@ -200,7 +200,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// TODO: this should be in a separate thread
 		if (timer.elapsedCycles() % 10 == 1) {
 			robot->updateModel();
-			robot->gravityVector(gj, Eigen::Vector3d(0.0, 0.0, -9.8));
+			robot->gravityVector(gj, Eigen::Vector3d(0.0, 0.0, -0.98));
 			actuated_space_inertia = (robot->_M_inv.block(6,6,robot->dof()-6, robot->dof()-6)).inverse();
 			actuated_space_projection = actuated_space_inertia * (robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()));
 			// cout << robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()) << endl;
