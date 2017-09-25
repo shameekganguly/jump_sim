@@ -69,7 +69,7 @@ int main (int argc, char** argv) {
 				0.0,	//1 floating_base_py
 				-0.25,	//2 floating_base_pz
 				0.0/180.0*M_PI, //3 floating_base_rx
-				10.0/180.0*M_PI, //4 floating_base_ry
+				4.0/180.0*M_PI, //4 floating_base_ry
 				0.0/180.0*M_PI,	//5 floating_base_rz
 				-30.0/180.0*M_PI,	//6 right thigh adduction
 				-60.0/180.0*M_PI,	//7 right thigh pitch
@@ -100,7 +100,9 @@ int main (int argc, char** argv) {
 				-15/180.0*M_PI;	//32 left ankle pitch - axis incorrect
 	robot->_q = q_home;
 	sim->setJointPositions(robot_name, robot->_q);
+	cout << "Reached here 1" << endl;
 	robot->updateModel();
+	cout << "Reached here 2" << endl;
 	// Eigen::Affine3d ee_trans;
 	// robot->transform(ee_trans, ee_link_name);
 	// cout << ee_trans.translation().transpose() << endl;
@@ -157,10 +159,25 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	timer.setLoopFrequency(200); //200Hz timer
 	double last_time = timer.elapsedTime(); //secs
 
+	// controller state variables
+	enum FSMState {
+		Balancing,
+		Jumping,
+		FallingMidAir
+	};
+	FSMState curr_state = FSMState::Balancing;
+
 	// cache variables
 	bool fTimerDidSleep = true;
 	Eigen::VectorXd tau = Eigen::VectorXd::Zero(robot->dof());
-	Eigen::VectorXd gj;
+	Eigen::VectorXd tau_act = Eigen::VectorXd::Zero(robot->dof() - 6);
+	Eigen::VectorXd gj(robot->dof());
+	Eigen::MatrixXd selection_mat(robot->dof() - 6, robot->dof());
+	// cout << selection_mat << endl;
+	Eigen::MatrixXd actuated_space_projection;
+	actuated_space_projection.setZero(robot->dof() - 6, robot->dof());
+	Eigen::MatrixXd actuated_space_inertia;
+	actuated_space_inertia.setZero(robot->dof() - 6, robot->dof() - 6);
 
 	// gains
 	double kpx = 40.0; // operational space kp
@@ -178,16 +195,38 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		// read joint positions, velocities, update model
 		sim->getJointPositions(robot_name, robot->_q);
 		sim->getJointVelocities(robot_name, robot->_dq);
-		robot->updateModel();
 
-		tau = robot->_M * (-kpj*(robot->_q - q_home) - kvj*(robot->_dq));
-		robot->gravityVector(gj, Eigen::Vector3d(0.0, 0.0, -9.8));
-		tau += gj;
-		// tau = robot->_M * (- kvj*(robot->_dq));
+		// update model every once in a while
+		// TODO: this should be in a separate thread
+		if (timer.elapsedCycles() % 10 == 1) {
+			robot->updateModel();
+			robot->gravityVector(gj, Eigen::Vector3d(0.0, 0.0, -9.8));
+			actuated_space_inertia = (robot->_M_inv.block(6,6,robot->dof()-6, robot->dof()-6)).inverse();
+			actuated_space_projection = actuated_space_inertia * (robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()));
+			// cout << robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()) << endl;
+		}
 
-		//
-		tau.head(6).setZero();
-		sim->setJointTorques(robot_name, tau);
+		// set tau_act
+		if (curr_state == FSMState::FallingMidAir) {
+			// simply compensate for gravity and brace for landing
+			tau_act = actuated_space_inertia*(- kvj*(robot->_dq.tail(robot->dof()-6)));
+			tau_act += actuated_space_projection*gj;
+			// TODO: check for contact and switch to FSMState::Balancing
+		}
+
+		if (curr_state == FSMState::Balancing) {
+			// TODO: start zero moment control at feet, small tension, COM stabilization and posture control to q_home
+			// TODO: if COM velocity has been zero for a while, switch to FSMState::Jumping
+		}
+
+		if (curr_state == FSMState::Jumping) {
+			// TODO: start accelerating COM upwards while maintaining tension between feet
+			// TODO: when contact is lost, switch to FSMState::FallingMidAir
+		}
+
+		// assemble full tau vector for simulation
+		tau.tail(robot->dof()-6) = tau_act;
+		// sim->setJointTorques(robot_name, tau);
 		// -------------------------------------------
 
 		// update last time
