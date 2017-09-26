@@ -6,7 +6,7 @@
 		<!-- model node is required -->
 		<model dir="../resources/toro" path="toro.urdf" name="DLR_TORO" />
 		<!-- origin node is optional -->
-		<origin xyz="0.0 0.0 1.25" rpy="0 0 0" />
+		<origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
 	</robot>
 
 	<static_object name="Box">

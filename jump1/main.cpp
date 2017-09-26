@@ -16,6 +16,9 @@ Date: 4/9/17
 
 #include "timer/LoopTimer.h"
 
+#include "force_sensor/ForceSensorSim.h"
+#include "force_sensor/ForceSensorDisplay.h"
+
 #include <GLFW/glfw3.h> //must be loaded after loading opengl/glew as part of graphicsinterface
 
 using namespace std;
@@ -29,8 +32,17 @@ const string camera_name = "camera_side";
 // const string camera_name = "camera_top";
 // const string ee_link_name = "link6";
 
+// contact link names
+const string right_foot_name = "RL_foot";
+const string left_foot_name = "LL_foot";
+const string torso_name = "hip_base";
+
 // global variables
 Eigen::VectorXd q_home;
+ForceSensorSim* left_foot_force_sensor;
+ForceSensorDisplay* left_foot_force_display;
+ForceSensorSim* right_foot_force_sensor;
+ForceSensorDisplay* right_foot_force_display;
 
 // simulation loop
 bool fSimulationRunning = false;
@@ -67,7 +79,7 @@ int main (int argc, char** argv) {
 	q_home.setZero(robot->dof());
 	q_home << 0.0, //0 floating_base_px
 				0.0,	//1 floating_base_py
-				-0.25,	//2 floating_base_pz
+				1.0,	//2 floating_base_pz
 				0.0/180.0*M_PI, //3 floating_base_rx
 				4.0/180.0*M_PI, //4 floating_base_ry
 				0.0/180.0*M_PI,	//5 floating_base_rz
@@ -117,6 +129,12 @@ int main (int argc, char** argv) {
 	// start the simulation
 	thread sim_thread(simulation, robot, sim);
 
+	// initialize force sensor: needs Sai2Simulation sim interface type
+	left_foot_force_sensor = new ForceSensorSim(robot_name, left_foot_name, Eigen::Affine3d::Identity(), sim, robot);
+	left_foot_force_display = new ForceSensorDisplay(left_foot_force_sensor, graphics);
+	right_foot_force_sensor = new ForceSensorSim(robot_name, right_foot_name, Eigen::Affine3d::Identity(), sim, robot);
+	right_foot_force_display = new ForceSensorDisplay(right_foot_force_sensor, graphics);
+
 	// next start the control thread
 	thread ctrl_thread(control, robot, sim);
 	
@@ -129,6 +147,8 @@ int main (int argc, char** argv) {
 		int width, height;
 		glfwGetFramebufferSize(window, &width, &height);
 		graphics->updateGraphics(robot_name, robot);
+		left_foot_force_display->update();
+		right_foot_force_display->update();
 		graphics->render(camera_name, width, height);
 		glfwSwapBuffers(window);
 		glFinish();
@@ -165,7 +185,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		Jumping,
 		FallingMidAir
 	};
-	FSMState curr_state = FSMState::Balancing;
+	FSMState curr_state = FSMState::FallingMidAir;
 
 	// cache variables
 	bool fTimerDidSleep = true;
@@ -178,12 +198,32 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	actuated_space_projection.setZero(robot->dof() - 6, robot->dof());
 	Eigen::MatrixXd actuated_space_inertia;
 	actuated_space_inertia.setZero(robot->dof() - 6, robot->dof() - 6);
+	std::vector<Eigen::Vector3d> left_foot_force_list;
+	std::vector<Eigen::Vector3d> left_foot_point_list;
+	std::vector<Eigen::Vector3d> right_foot_force_list;
+	std::vector<Eigen::Vector3d> right_foot_point_list;
+	Eigen::MatrixXd J_task;
+	Eigen::MatrixXd Jv_com(3, robot->dof()); //TODO: consider full 6-DOF com task?
+	Eigen::MatrixXd Jw_left_foot(3, robot->dof());
+	Eigen::MatrixXd Jw_right_foot(3, robot->dof());
+	Eigen::MatrixXd Jv_left_foot(3, robot->dof());
+	Eigen::MatrixXd Jv_right_foot(3, robot->dof());
+	const Eigen::Vector3d left_foot_frame_pos_local(0.0, 0.0, 0.0); //TODO: should this be at the ground point or the joint?
+	const Eigen::Vector3d right_foot_frame_pos_local(0.0, 0.0, 0.0); //TODO: should this be at the ground point or the joint?
+	Eigen::Vector3d left_foot_frame_pos_world; // position of left foot frame
+	Eigen::Vector3d right_foot_frame_pos_world; // position of right foot frame
+	Eigen::MatrixXd J_feet_tension(1, robot->dof());
+	Eigen::Vector3d left_to_right_foot_unit_vec;
 
 	// gains
-	double kpx = 40.0; // operational space kp
-	double kvx = 10.0; // operational space kv
+	double kplcom = 40.0; // COM linear kp
+	double kvlcom = 10.0; // COM linear kv
 	double kpj = 70.0; // joint space kp
 	double kvj = 30.0; // joint space kv
+	double kpwleftf = 40; // left foot admittance kp for zero moment control
+	double kvwleftf = 10; // left foot kv damping
+	double kpwrightf = 40; // right foot admittance kp for zero moment control
+	double kvwrightf = 10; // right foot kv damping
 
 	while (fSimulationRunning) { //automatically set to false when simulation is quit
 		fTimerDidSleep = timer.waitForNextLoop();
@@ -204,7 +244,38 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			actuated_space_inertia = (robot->_M_inv.block(6,6,robot->dof()-6, robot->dof()-6)).inverse();
 			actuated_space_projection = actuated_space_inertia * (robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()));
 			// cout << robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()) << endl;
+
+			// get the task Jacobians
+			// - Jv com: TODO: need to add up the Jacobians for all the links
+			// For now, we use the torso frame as a surrogate
+			robot->Jv(Jv_com, torso_name, Eigen::Vector3d(0.0, 0.0, 0.0));
+			// - Jw left foot rot
+			robot->Jw(Jw_left_foot, left_foot_name);
+			// - Jw right foot rot
+			robot->Jw(Jw_right_foot, right_foot_name);
+			// - J feet tension
+			robot->Jv(Jv_left_foot, left_foot_name, left_foot_frame_pos_local);
+			robot->Jv(Jv_right_foot, right_foot_name, right_foot_frame_pos_local);
+			robot->position(left_foot_frame_pos_world, left_foot_name, left_foot_frame_pos_local);
+			robot->position(right_foot_frame_pos_world, right_foot_name, right_foot_frame_pos_local);
+			left_to_right_foot_unit_vec = (right_foot_frame_pos_world - left_foot_frame_pos_world);
+			left_to_right_foot_unit_vec.normalize();
+			J_feet_tension = left_to_right_foot_unit_vec*(Jv_right_foot - Jv_left_foot);
 		}
+
+		// get all contact points from the sim
+		sim->getContactList(left_foot_point_list, left_foot_force_list, robot_name, left_foot_name);
+		sim->getContactList(right_foot_point_list, right_foot_force_list, robot_name, right_foot_name);
+
+		// update force sensors
+		left_foot_force_sensor->update();
+		// Eigen::Vector3d left_foot_force;
+		// Eigen::Vector3d left_foot_moment;
+		// left_foot_force_sensor->getForce(left_foot_force);
+		// left_foot_force_sensor->getMoment(left_foot_moment);
+		// cout << "Left foot force: " << left_foot_moment.transpose()
+		// 		<< " Left foot moment: " << left_foot_moment.transpose() << endl;
+		right_foot_force_sensor->update();
 
 		// set tau_act
 		if (curr_state == FSMState::FallingMidAir) {
@@ -212,11 +283,50 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			tau_act = actuated_space_inertia*(- kvj*(robot->_dq.tail(robot->dof()-6)));
 			tau_act += actuated_space_projection*gj;
 			// TODO: check for contact and switch to FSMState::Balancing
+			if (left_foot_point_list.size() || right_foot_point_list.size()) {
+				curr_state = FSMState::Balancing;
+				cout << "Switching from FallingMidAir to Balancing" << endl;
+			}
 		}
 
 		if (curr_state == FSMState::Balancing) {
 			// TODO: start zero moment control at feet, small tension, COM stabilization and posture control to q_home
+			// - size the task Jacobian
+			size_t J_task_size = 3; // for the COM task
+			// TODO: consider omega for the body as well? In effect, right now, we are relying on posture to handle it
+			bool f_left_foot_contact = (left_foot_point_list.size());
+			bool f_right_foot_contact = (right_foot_point_list.size());
+			if (f_left_foot_contact) { J_task_size += 3; } // for moment control at left foot
+			if (f_right_foot_contact) { J_task_size += 3; } // for moment control at right foot
+			if (f_left_foot_contact && f_right_foot_contact) { J_task_size += 1; } // for internal tension control between feet
+			J_task.setZero(J_task_size, robot->dof());
+
+			// - set the task Jacobian
+			size_t J_task_counter = 0;
+			J_task.block(J_task_counter,0,3,robot->dof()) = Jv_com;
+			J_task_counter += 3;
+			if (f_left_foot_contact) {
+				J_task.block(J_task_counter,0,3,robot->dof()) = Jw_left_foot;
+				J_task_counter += 3;
+			}
+			if (f_right_foot_contact) {
+				J_task.block(J_task_counter,0,3,robot->dof()) = Jw_right_foot;
+				J_task_counter += 3;
+			}
+			if (f_left_foot_contact && f_right_foot_contact) {
+				J_task.block(J_task_counter,0,1,robot->dof()) = J_feet_tension;
+				J_task_counter += 1;
+			}
+
+			// - compute task forces
+
+			// - compute posture torques
+
+			// - compute required joint torques
+
 			// TODO: if COM velocity has been zero for a while, switch to FSMState::Jumping
+
+			// TODO: check friction cone constraint
 		}
 
 		if (curr_state == FSMState::Jumping) {
@@ -226,7 +336,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 		// assemble full tau vector for simulation
 		tau.tail(robot->dof()-6) = tau_act;
-		// sim->setJointTorques(robot_name, tau);
+		sim->setJointTorques(robot_name, tau);
 		// -------------------------------------------
 
 		// update last time
