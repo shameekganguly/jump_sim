@@ -1,7 +1,9 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <stdlib.h>
 #include <math.h>
+#include <time.h>
 #include "model/ModelInterface.h"
 #include "graphics/ChaiGraphics.h"
 #include "simulation/Sai2Simulation.h"
@@ -46,6 +48,9 @@ void keySelect(GLFWwindow* window, int key, int scancode, int action, int mods);
 MatrixXd pseudoinverse(const MatrixXd &mat, double tolerance = 1e-4);
 
 int main (int argc, char** argv) {
+	// initialize random
+	srand (time(NULL));
+
 	cout << "Loading URDF world model file: " << robot_fname << endl;
 
 	// load graphics scene
@@ -59,7 +64,7 @@ int main (int argc, char** argv) {
 
 	// load simulation world
 	auto sim = new Simulation::Sai2Simulation(world_fname, Simulation::urdf, false);
-	sim->setCollisionRestitution(0.3);
+	sim->setCollisionRestitution(0.2);
  //    // set co-efficient of friction also to zero for now as this causes jitter
     sim->setCoeffFrictionStatic(1.0);
     sim->setCoeffFrictionDynamic(1.0);
@@ -68,7 +73,7 @@ int main (int argc, char** argv) {
 	q_home.setZero(dof);
 	q_home << -1.8, //0 floating_base_px
 				0.0,	//1 floating_base_py
-				5.0/180.0*M_PI,	//2 floating_base_rz
+				((float) (rand() % 10 - 5)) /180.0*M_PI,	//2 floating_base_rz
 				70.0/180.0*M_PI,	//3 left thigh adduction
 				30.0/180.0*M_PI,	//4 left knee adduction
 				-70.0/180.0*M_PI,	//5 right thigh adduction
@@ -341,19 +346,19 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 				J_task.block(0,0,2,dof) = Jv_com; // linear part
 				J_task(2,2) = 1; // angular part
 				J_task = J_task * N_contact;
-				cout << "J_task " << endl << J_task << endl;
+				// cout << "J_task " << endl << J_task << endl;
 				
 				// - compute task forces
 				L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
-				cout << "L_task " << endl << L_task << endl;
+				// cout << "L_task " << endl << L_task << endl;
 				robot->position(com_pos, torso_name, Vector3d(0.0,0.0,0.0));
 				com_v << Jv_com*robot->_dq, (robot->_dq)[2];
-				cout << "com_v " << endl << com_v << endl;
+				// cout << "com_v " << endl << com_v << endl;
 				com_pos_err << (com_pos[0] + des_com_height_balanced), (com_pos[1] - pos_support_centroid[1]), robot->_q[2];
-				cout << "com_pos_err " << endl << com_pos_err << endl;
+				// cout << "com_pos_err " << endl << com_pos_err << endl;
 				//TODO: separate linear and angular parts in task force below
 				F_task = L_task*(- kplcom*com_pos_err - kvlcom*com_v + J_task*robot->_M_inv*N_contact.transpose()*gj);
-				cout << "F_task " << endl << F_task << endl;
+				// cout << "F_task " << endl << F_task << endl;
 
 				// - compute posture torques
 				null_actuated_space_projection_contact = 
@@ -385,7 +390,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 					cout << "Slip detected " << F_contact.transpose() << endl;
 					tau_act.setZero(act_dof); //play safe
 				}
-				cout << "tau_act " << endl << tau_act << endl;
+				// cout << "tau_act " << endl << tau_act << endl;
 			}
 		}
 
