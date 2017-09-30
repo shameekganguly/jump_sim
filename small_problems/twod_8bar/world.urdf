@@ -1,0 +1,73 @@
+<?xml version="1.0" ?>
+
+<world name="demo_world" gravity="3.0 0.0 0.0">
+
+	<robot name="EightBar">
+		<!-- model node is required -->
+		<model dir="resources" path="eight_bar.urdf" name="FloatingEightBar" />
+		<!-- origin node is optional -->
+		<origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+	</robot>
+
+	<static_object name="Box">
+		<origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+	    <visual>
+	        <origin xyz="0.0 0.0 0.0" rpy="0 1.5707 0" />
+	        <geometry>
+	            <cylinder radius="1.5" length="0.1"/>
+	        </geometry>
+	        <material name="material_red">
+		        <color rgba="0.1 0.1 0.1 1.0" />
+	        </material>
+	    </visual>
+	    <collision>
+	        <origin xyz="0.0 0.0 0.0" rpy="0 1.5707 0" />
+	        <geometry>
+	            <cylinder radius="1.0" length="0.1"/>
+	        </geometry>
+	    </collision>
+	</static_object>
+
+	<light name="light1" type="directional">
+		<position xyz="-5.0 -3.0 3.0" />
+		<lookat xyz="0.0 0.0 0.0" />
+	</light>
+
+	<light name="light2" type="directional">
+		<position xyz="-5.0 3.0 3.0" />
+		<lookat xyz="0.0 0.0 0.0" />
+	</light>
+
+	<light name="light3" type="directional">
+		<position xyz="0.0 0.0 4.0" />
+		<lookat xyz="2.0 0.0 0.0" />
+	</light>
+
+<!-- 	<light name="light_spot" type="spot">
+		<position xyz="4.0 0.0 3.0" />
+		<lookat xyz="0.0 0.0 1.0" />
+	</light> -->
+
+	<camera name="camera_front">
+		<position xyz="4.0 0.0 2.0" />
+		<vertical xyz="0.0 0.0 1.0" />
+		<lookat xyz="0.0 0.0 1.0" />
+	</camera>
+	<camera name="camera_top">
+		<position xyz="-1.5 0.0 4.5" />
+		<vertical xyz="-1.0 0.0 0.0" />
+		<lookat xyz="-1.0 0.0 0.0" />
+	</camera>
+	<camera name="camera_side">
+		<position xyz="0.0 -3.0 2.0" />
+		<vertical xyz="0.0 0.0 1.0" />
+		<lookat xyz="0.0 0.0 0.5" />
+	</camera>
+	<camera name="camera_isometric">
+		<position xyz="2.5 -2.5 3.0" />
+		<vertical xyz="0.0 0.0 1.0" />
+		<lookat xyz="0.0 0.0 0.0" />
+	</camera>
+
+	<!-- TODO: support stereo specification -->
+</world>

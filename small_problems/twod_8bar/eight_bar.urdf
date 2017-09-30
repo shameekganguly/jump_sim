@@ -1,0 +1,215 @@
+<?xml version="1.0"?>
+<robot name="FloatingEightBar">
+
+    <link name="ground">
+	    <!-- <origin xyz="0.0 0.0 0.0" rpy="0 0 0" /> -->
+	    <inertial>
+	        <origin xyz="0 0 0" rpy="0 0 0" />
+	        <mass value="1e-9" />
+	        <inertia ixx="1e-9" iyy="1e-9" izz="1e-9" ixy="0" ixz="0" iyz="0" />
+	    </inertial>
+    </link>
+
+    <link name="floating_virtual1">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <mass value="0.001" />
+            <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0" />
+        </inertial>
+    </link>
+    <link name="floating_virtual2">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <mass value="0.001" />
+            <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0" />
+        </inertial>
+    </link>
+    <link name="hip_base">
+        <inertial>
+			<origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+			<mass value="10.0" />
+			<inertia  ixx="0.001" iyy="0.001" izz="0.001" ixy="0.000" ixz="0.000" iyz="0.000" />
+		</inertial>
+        <visual>
+            <origin xyz="-0.2 0.0 0.0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.4 0.4 0.2"/>
+            </geometry>
+            <material name="material_maroon">
+                <color rgba="0.6 0.2 0.3 1.0" />
+            </material>
+        </visual>
+    </link>
+    <link name="right_thigh">
+        <inertial>
+            <origin xyz="0.0 0.25 0.0" rpy="0 0 0" />
+            <mass value="2.5" />
+            <inertia  ixx="0.0001" iyy="0.0001" izz="0.00001" ixy="0.000" ixz="0.000" iyz="0.000" />
+        </inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.0" rpy="-1.5707 0 0" />
+            <geometry>
+                <cylinder radius="0.05" length="0.45"/>
+            </geometry>
+            <material name="material_grey">
+                <color rgba="0.2 0.2 0.2 1.0" />
+            </material>
+        </visual>
+    </link>
+    <link name="right_leg">
+        <inertial>
+			<origin xyz="0.0 0.25 0.0" rpy="0 0 0" />
+			<mass value="2.5" />
+			<inertia  ixx="0.0001" iyy="0.0001" izz="0.00001" ixy="0.000" ixz="0.000" iyz="0.000" />
+		</inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.0" rpy="-1.5707 0 0" />
+            <geometry>
+                <cylinder radius="0.05" length="0.45"/>
+            </geometry>
+            <material name="material_grey">
+                <color rgba="0.2 0.2 0.2 1.0" />
+            </material>
+        </visual>
+    </link>
+    <link name="right_foot">
+        <inertial>
+            <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+            <mass value="0.5" />
+            <inertia  ixx="0.000002" iyy="0.000002" izz="0.000002" ixy="0.000" ixz="0.000" iyz="0.000" />
+        </inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.15 0.03 0.1"/>
+            </geometry>
+            <material name="material_maroon">
+                <color rgba="0.6 0.2 0.3 1.0" />
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.15 0.03 0.1"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="left_thigh">
+        <inertial>
+            <origin xyz="0.0 -0.25 0.0" rpy="0 0 0" />
+            <mass value="2.5" />
+            <inertia  ixx="0.0001" iyy="0.0001" izz="0.00001" ixy="0.000" ixz="0.000" iyz="0.000" />
+        </inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.0" rpy="1.5707 0 0" />
+            <geometry>
+                <cylinder radius="0.05" length="0.45"/>
+            </geometry>
+            <material name="material_grey">
+                <color rgba="0.2 0.2 0.2 1.0" />
+            </material>
+        </visual>
+    </link>
+    <link name="left_leg">
+        <inertial>
+			<origin xyz="0.0 -0.25 0.0" rpy="0 0 0" />
+			<mass value="2.5" />
+			<inertia  ixx="0.0001" iyy="0.0001" izz="0.00001" ixy="0.000" ixz="0.000" iyz="0.000" />
+		</inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.0" rpy="1.5707 0 0" />
+            <geometry>
+                <cylinder radius="0.05" length="0.45"/>
+            </geometry>
+            <material name="material_grey">
+                <color rgba="0.2 0.2 0.2 1.0" />
+            </material>
+        </visual>
+    </link>
+    <link name="left_foot">
+        <inertial>
+            <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+            <mass value="0.5" />
+            <inertia  ixx="0.000002" iyy="0.000002" izz="0.000002" ixy="0.000" ixz="0.000" iyz="0.000" />
+        </inertial>
+        <visual>
+            <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.15 0.03 0.1"/>
+            </geometry>
+            <material name="material_maroon">
+                <color rgba="0.6 0.2 0.3 1.0" />
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.15 0.03 0.1"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="floating_base_p1" type="prismatic">
+        <parent link="ground"/>
+        <child link="floating_virtual1"/>
+        <origin xyz="0.000000 0.000000 0.00000" rpy="0.000000 0.000000 0.000000" />
+        <axis xyz="1 0 0"/>
+        <limit lower="5.00" upper="5.00" effort="4000" velocity="1000" />
+    </joint>
+    <joint name="floating_base_p2" type="prismatic">
+        <parent link="floating_virtual1"/>
+        <child link="floating_virtual2"/>
+        <origin xyz="0.000000 0.000000 0.00000" rpy="0.000000 0.000000 0.000000" />
+        <axis xyz="0 1 0"/>
+        <limit lower="5.00" upper="5.00" effort="4000" velocity="1000" />
+    </joint>
+    <joint name="floating_base_r1" type="revolute">
+        <parent link="floating_virtual2"/>
+        <child link="hip_base"/>
+        <origin xyz="0.000000 0.000000 0.00000" rpy="0.000000 0.000000 0.000000" />
+        <axis xyz="0 0 1"/>
+        <limit lower="5.00" upper="5.00" effort="4000" velocity="1000" />
+    </joint>
+    <joint name="right_hip_joint" type="revolute">
+        <parent link="hip_base"/>
+        <child link="right_thigh"/>
+        <origin xyz="0.000000 0.2000000 0.00000" rpy="0.000000 0.000000 0.000000" />
+        <axis xyz="0 0 1"/>
+        <limit lower="5.00" upper="5.00" effort="4000" velocity="1000" />
+    </joint>
+    <joint name="right_knee_joint" type="revolute">
+        <parent link="right_thigh"/>
+        <child link="right_leg"/>
+        <origin xyz="0.000000 0.5000000 0.00000" rpy="0.000000 0.000000 0.000000" />
+        <axis xyz="0 0 1"/>
+        <limit lower="5.00" upper="5.00" effort="4000" velocity="1000" />
+    </joint>
+    <joint name="right_ankle_joint" type="revolute">
+        <parent link="right_leg"/>
+        <child link="right_foot"/>
+        <origin xyz="0.000000 0.450000 0.00000" rpy="0.000000 0.000000 0.000000" />
+        <axis xyz="0 0 1"/>
+        <limit lower="5.00" upper="5.00" effort="4000" velocity="1000" />
+    </joint>
+    <joint name="left_hip_joint" type="revolute">
+        <parent link="hip_base"/>
+        <child link="left_thigh"/>
+        <origin xyz="0.000000 -0.2000000 0.00000" rpy="0.000000 0.000000 0.000000" />
+        <axis xyz="0 0 1"/>
+        <limit lower="5.00" upper="5.00" effort="4000" velocity="1000" />
+    </joint>
+    <joint name="left_knee_joint" type="revolute">
+        <parent link="left_thigh"/>
+        <child link="left_leg"/>
+        <origin xyz="0.000000 -0.5000000 0.00000" rpy="0.000000 0.000000 0.000000" />
+        <axis xyz="0 0 1"/>
+        <limit lower="5.00" upper="5.00" effort="4000" velocity="1000" />
+    </joint>
+    <joint name="left_ankle_joint" type="revolute">
+        <parent link="left_leg"/>
+        <child link="left_foot"/>
+        <origin xyz="0.000000 -0.450000 0.00000" rpy="0.000000 0.000000 0.000000" />
+        <axis xyz="0 0 1"/>
+        <limit lower="5.00" upper="5.00" effort="4000" velocity="1000" />
+    </joint>
+</robot>
