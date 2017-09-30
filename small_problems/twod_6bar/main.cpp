@@ -73,7 +73,8 @@ int main (int argc, char** argv) {
 	q_home.setZero(dof);
 	q_home << -1.8, //0 floating_base_px
 				0.0,	//1 floating_base_py
-				((float) (rand() % 10 - 5)) /180.0*M_PI,	//2 floating_base_rz
+				((float) (rand() % 30 - 15)) /180.0*M_PI,	//2 floating_base_rz
+				// 15.0/180.0*M_PI,	//2 floating_base_rz
 				60.0/180.0*M_PI,	//3 left thigh adduction
 				50.0/180.0*M_PI,	//4 left knee adduction
 				-60.0/180.0*M_PI,	//5 right thigh adduction
@@ -144,7 +145,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 	// controller state variables
 	enum FSMState {
-		Balancing,
+		BalancingDoubleStance,
+		BalancingSingleStance,
 		Jumping,
 		FallingMidAir
 	};
@@ -378,26 +380,88 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			balance_counter = 0;
 			// simply compensate for gravity and brace for landing
 			q_fall = q_home.tail(act_dof);
-			q_fall[0] = q_home[3]*(1 - 2.42*fmax(0.0, fabs(robot->_q[2]) - (5.0/180.0*M_PI)));
+			q_fall[0] = q_home[3]*(1 - 2.0*fmax(0.0, fabs(robot->_q[2]) - (5.0/180.0*M_PI)));
 			q_fall[2] = -q_fall[0];
 			// tau_act = actuated_space_inertia*(-kpj*(robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*(robot->_dq.tail(act_dof)));
 			tau_act = actuated_space_inertia*(-kpj*(robot->_q.tail(act_dof) - q_fall) - kvj*(robot->_dq.tail(act_dof)));
 			tau_act += actuated_space_projection*gj;
-			// check for contact and switch to FSMState::Balancing
+			// check for contact and switch to FSMState::BalancingDoubleStance
 			if (left_foot_point_list.size() || right_foot_point_list.size()) { 
-				// ^^ this works better than checking if both feet are on the ground. TODO: I think it would be worthwhile to implement
-				// a controller to handle the single point of contact case.
-				curr_state = FSMState::Balancing;
-				cout << "Switching from FallingMidAir to Balancing" << endl;
 				// set default support position before update to be in the center of the projections of
 				// both feet
 				pos_support_centroid << 0.0, (left_foot_frame_pos_world[1] + right_foot_frame_pos_world[1])*0.5, 0.0;
 				// reset the stable balance counter
 				stable_counter = 0;
+				if (fabs(robot->_q[2]) > 7.0/180.0*M_PI) {
+					//^^ poor posture, switch to single support stance
+					curr_state = FSMState::BalancingSingleStance;
+					cout << "Switching from FallingMidAir to BalancingSingleStance" << endl;	
+				} else {
+					curr_state = FSMState::BalancingDoubleStance;
+					cout << "Switching from FallingMidAir to BalancingDoubleStance" << endl;
+				}
 			}
 		}
 
-		if (curr_state == FSMState::Balancing) {
+		if (curr_state == FSMState::BalancingSingleStance) {
+			balance_counter = BALANCE_COUNT_THRESH;
+			// TODO: start zero tension, COM stabilization and posture control to q_home
+			robot->position(com_pos, torso_name, Vector3d(0.0,0.0,0.0));
+
+			// - set the task Jacobian, project through the contact null-space
+			J_task.setZero(2, dof);
+			J_task = Jv_com;
+			Eigen::VectorXd task_v = J_task*robot->_dq;
+			Eigen::VectorXd task_pos_err(2);
+			task_pos_err << 0.0, (com_pos[1] - pos_support_centroid[1]);
+
+			// - compute task forces
+			if(left_foot_point_list.size()) {
+				J_task = J_task * N_contact_left;
+				L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
+				F_task = L_task*(- 4.0*kplcom*task_pos_err - kvlcom*task_v + J_task*robot->_M_inv*N_contact_left.transpose()*gj);
+				null_actuated_space_projection_contact = 
+				MatrixXd::Identity(act_dof,act_dof) - actuated_space_projection_contact_left.transpose()*J_task.transpose()*L_task*J_task*robot->_M_inv*SN_contact_left.transpose();
+
+				// - compute required joint torques
+				tau_act = actuated_space_projection_contact_left.transpose()*(J_task.transpose()*F_task);
+				tau_act += null_actuated_space_projection_contact*(
+					actuated_space_projection_contact_left.transpose()*gj + 
+					actuated_space_inertia_contact_left*(-kpj*4.0 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*2.0 * robot->_dq.tail(act_dof))
+				);
+			}
+			else if(right_foot_point_list.size()) {
+				J_task = J_task * N_contact_right;
+				L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
+				F_task = L_task*(- 4.0*kplcom*task_pos_err - kvlcom*task_v + J_task*robot->_M_inv*N_contact_right.transpose()*gj);
+				null_actuated_space_projection_contact = 
+				MatrixXd::Identity(act_dof,act_dof) - actuated_space_projection_contact_right.transpose()*J_task.transpose()*L_task*J_task*robot->_M_inv*SN_contact_right.transpose();
+
+				// - compute required joint torques
+				tau_act = actuated_space_projection_contact_right.transpose()*(J_task.transpose()*F_task);
+				tau_act += null_actuated_space_projection_contact*(
+					actuated_space_projection_contact_right.transpose()*gj + 
+					actuated_space_inertia_contact_right*(-kpj*4.0 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*2.0 * robot->_dq.tail(act_dof))
+				);
+			}
+			
+			
+			// cout << "J_task " << endl << J_task << endl;
+			// cout << "L_task " << endl << L_task << endl;
+			// cout << "com_v " << endl << com_v << endl;
+			// cout << "com_pos_err " << endl << com_pos_err << endl;
+			// cout << "F_task " << endl << F_task << endl;
+
+			// TODO: if double contact is achieved, switch to falling mid air temporarily which should automatically switch
+			// to BalancingDoubleStance with safe control torques for the initial balance
+			// if (left_foot_point_list.size() && right_foot_point_list.size()) {
+			if (left_foot_frame_pos_world[0] > -0.05 && right_foot_frame_pos_world[0] > -0.05) {
+				curr_state = FSMState::BalancingDoubleStance;
+				cout << "Switching from BalancingSingleStance to BalancingDoubleStance" << endl;
+			}
+		}
+
+		if (curr_state == FSMState::BalancingDoubleStance) {
 			balance_counter++;
 			if (balance_counter > BALANCE_COUNT_THRESH) {
 				// TODO: start zero tension, COM stabilization and posture control to q_home
@@ -431,12 +495,12 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 				tau_act += null_actuated_space_projection_contact*(actuated_space_projection_contact_both.transpose()*gj);
 				// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
 				
-				// TODO: if COM velocity has been zero for a while, switch to FSMState::Jumping
+				// if COM velocity has been zero for a while, switch to FSMState::Jumping
 				// if (left_foot_point_list.size() && right_foot_point_list.size() && com_v.array().abs().maxCoeff() < 5e-3) {
 				if ((left_foot_point_list.size() || right_foot_point_list.size()) && com_v.array().abs().maxCoeff() < 5e-3) {
 					if (stable_counter > STABLE_COUNT_THRESH) {
 						curr_state = FSMState::Jumping;
-						cout << "Switching from Balancing to Jumping" << endl;
+						cout << "Switching from BalancingDoubleStance to Jumping" << endl;
 						// reset jump counter
 						jump_counter = 0;
 					}
@@ -481,17 +545,17 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 						// }
 					// }
 					if (is_sticking) {
-						cout << "Exceeded normal force " << F_contact.transpose() << endl;
-						if (left_foot_force_list.size()) {
-							cout << "Actual left foot contact forces " << left_foot_force_list[0].transpose() << endl;
-						}
-						if (right_foot_force_list.size()) {
-							cout << "Actual right foot contact forces " << right_foot_force_list[0].transpose() << endl;
-						}
+						// cout << "Exceeded normal force " << F_contact.transpose() << endl;
+						// if (left_foot_force_list.size()) {
+						// 	cout << "Actual left foot contact forces " << left_foot_force_list[0].transpose() << endl;
+						// }
+						// if (right_foot_force_list.size()) {
+						// 	cout << "Actual right foot contact forces " << right_foot_force_list[0].transpose() << endl;
+						// }
 						tau_act.setZero(act_dof); //play safe
 					}
 					else if (is_slipping) {
-						cout << "Slip detected " << F_contact.transpose() << endl;
+						// cout << "Slip detected " << F_contact.transpose() << endl;
 						tau_act.setZero(act_dof); //play safe
 					}
 				// }
