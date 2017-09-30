@@ -229,7 +229,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	uint balance_counter;
 	const uint BALANCE_COUNT_THRESH = 11;
 	uint stable_counter;
-	const uint STABLE_COUNT_THRESH = 21;
+	const uint STABLE_COUNT_THRESH = 11;
 	uint jump_counter;
 	const uint JUMP_COUNT_THRESH = 5;
 
@@ -441,12 +441,14 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 				}
 
 				// check friction cone constraint only if in two point support. Ok to slip a bit in single point support
-				if (left_foot_point_list.size() || right_foot_point_list.size()) {
+				// if (left_foot_point_list.size() || right_foot_point_list.size()) {
+				// ^^ this check does not work because it is possible that the robot is in contact at the next time step
+				// and so it might slip
 					temp_tau.setZero(dof);
 					temp_tau.tail(act_dof) = tau_act;
 					bool is_sticking = false;
 					bool is_slipping = false;
-					if (left_foot_point_list.size() && right_foot_point_list.size()) {
+					// if (left_foot_point_list.size() && right_foot_point_list.size()) {
 						F_contact = -L_contact_both*J_c_both*robot->_M_inv*(temp_tau - gj);
 						if (F_contact[0] > -0.1 || F_contact[2] > -0.1) {
 							is_sticking = true;
@@ -454,23 +456,23 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 						else if (fabs(F_contact[1]/F_contact[0]) > 0.8 || fabs(F_contact[3]/F_contact[2]) > 0.8) {
 							is_slipping = true;
 						}
-					} else if (left_foot_point_list.size()) {
-						F_contact = -L_contact_left*J_c_left*robot->_M_inv*(temp_tau - gj);
-						if (F_contact[0] > -0.1) {
-							is_sticking = true;
-						}
-						else if (fabs(F_contact[1]/F_contact[0]) > 0.8) {
-							is_slipping = true;
-						}
-					} else if (right_foot_point_list.size()) {
-						F_contact = -L_contact_right*J_c_right*robot->_M_inv*(temp_tau - gj);
-						if (F_contact[0] > -0.1) {
-							is_sticking = true;
-						}
-						else if (fabs(F_contact[1]/F_contact[0]) > 0.8) {
-							is_slipping = true;
-						}
-					}
+					// } else if (left_foot_point_list.size()) {
+						// F_contact = -L_contact_left*J_c_left*robot->_M_inv*(temp_tau - gj);
+						// if (F_contact[0] > -0.1) {
+						// 	is_sticking = true;
+						// }
+						// else if (fabs(F_contact[1]/F_contact[0]) > 0.8) {
+						// 	is_slipping = true;
+						// }
+					// } else if (right_foot_point_list.size()) {
+						// F_contact = -L_contact_right*J_c_right*robot->_M_inv*(temp_tau - gj);
+						// if (F_contact[0] > -0.1) {
+						// 	is_sticking = true;
+						// }
+						// else if (fabs(F_contact[1]/F_contact[0]) > 0.8) {
+						// 	is_slipping = true;
+						// }
+					// }
 					if (is_sticking) {
 						cout << "Exceeded normal force " << F_contact.transpose() << endl;
 						if (left_foot_force_list.size()) {
@@ -479,13 +481,13 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 						if (right_foot_force_list.size()) {
 							cout << "Actual right foot contact forces " << right_foot_force_list[0].transpose() << endl;
 						}
-						// tau_act.setZero(act_dof); //play safe
+						tau_act.setZero(act_dof); //play safe
 					}
 					else if (is_slipping) {
 						cout << "Slip detected " << F_contact.transpose() << endl;
-						// tau_act.setZero(act_dof); //play safe
+						tau_act.setZero(act_dof); //play safe
 					}
-				}
+				// }
 				// cout << "tau_act " << endl << tau_act << endl;
 			}
 		}
@@ -538,12 +540,12 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 		// // assemble full tau vector for simulation
 		// cout << tau_act.transpose() << endl;
-		if (isnan(tau_act.array()).maxCoeff() > 0) {
-			// << this does not stop the simulation from blowing up. probably because the torque values are very high even before being NaN
-			// TODO: handle better
-			tau_act.setZero(act_dof);
-			cout << "nan torques" << endl;
-		}
+		// if (isnan(tau_act.array()).maxCoeff() > 0) {
+		// 	// << this does not stop the simulation from blowing up. probably because the torque values are very high even before being NaN
+		// 	// TODO: handle better
+		// 	tau_act.setZero(act_dof);
+		// 	cout << "nan torques" << endl;
+		// }
 		tau.tail(act_dof) = tau_act;
 		sim->setJointTorques(robot_name, tau);
 		// -------------------------------------------
