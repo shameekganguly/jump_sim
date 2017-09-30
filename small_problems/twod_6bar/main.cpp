@@ -74,10 +74,10 @@ int main (int argc, char** argv) {
 	q_home << -1.8, //0 floating_base_px
 				0.0,	//1 floating_base_py
 				((float) (rand() % 10 - 5)) /180.0*M_PI,	//2 floating_base_rz
-				70.0/180.0*M_PI,	//3 left thigh adduction
-				30.0/180.0*M_PI,	//4 left knee adduction
-				-70.0/180.0*M_PI,	//5 right thigh adduction
-				-30.0/180.0*M_PI;	//6 right knee adduction
+				60.0/180.0*M_PI,	//3 left thigh adduction
+				50.0/180.0*M_PI,	//4 left knee adduction
+				-60.0/180.0*M_PI,	//5 right thigh adduction
+				-50.0/180.0*M_PI;	//6 right knee adduction
 
 	robot->_q = q_home;
 	sim->setJointPositions(robot_name, robot->_q);
@@ -233,6 +233,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	uint jump_counter;
 	const uint JUMP_COUNT_THRESH = 5;
 
+	Eigen::VectorXd q_fall;
+
 	// gains
 	double kplcom = 20.0; // COM linear kp
 	double kvlcom = 10.0; // COM linear kv
@@ -375,7 +377,11 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		if (curr_state == FSMState::FallingMidAir) {
 			balance_counter = 0;
 			// simply compensate for gravity and brace for landing
-			tau_act = actuated_space_inertia*(-kpj*(robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*(robot->_dq.tail(act_dof)));
+			q_fall = q_home.tail(act_dof);
+			q_fall[0] = q_home[3]*(1 - 2.42*fmax(0.0, fabs(robot->_q[2]) - (5.0/180.0*M_PI)));
+			q_fall[2] = -q_fall[0];
+			// tau_act = actuated_space_inertia*(-kpj*(robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*(robot->_dq.tail(act_dof)));
+			tau_act = actuated_space_inertia*(-kpj*(robot->_q.tail(act_dof) - q_fall) - kvj*(robot->_dq.tail(act_dof)));
 			tau_act += actuated_space_projection*gj;
 			// check for contact and switch to FSMState::Balancing
 			if (left_foot_point_list.size() || right_foot_point_list.size()) { 
@@ -426,7 +432,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 				// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
 				
 				// TODO: if COM velocity has been zero for a while, switch to FSMState::Jumping
-				if (left_foot_point_list.size() && right_foot_point_list.size() && com_v.array().abs().maxCoeff() < 5e-3) {
+				// if (left_foot_point_list.size() && right_foot_point_list.size() && com_v.array().abs().maxCoeff() < 5e-3) {
+				if ((left_foot_point_list.size() || right_foot_point_list.size()) && com_v.array().abs().maxCoeff() < 5e-3) {
 					if (stable_counter > STABLE_COUNT_THRESH) {
 						curr_state = FSMState::Jumping;
 						cout << "Switching from Balancing to Jumping" << endl;
@@ -453,7 +460,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 						if (F_contact[0] > -0.1 || F_contact[2] > -0.1) {
 							is_sticking = true;
 						}
-						else if (fabs(F_contact[1]/F_contact[0]) > 0.9 || fabs(F_contact[3]/F_contact[2]) > 0.9) {
+						else if (fabs(F_contact[1]/F_contact[0]) > 0.8 || fabs(F_contact[3]/F_contact[2]) > 0.8) {
 							is_slipping = true;
 						}
 					// } else if (left_foot_point_list.size()) {
@@ -494,7 +501,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 		if (curr_state == FSMState::Jumping) {
 			Eigen::Vector3d com_desired_velocity; // vx, vy, w
-			com_desired_velocity << -4, 0.0, 0.0;
+			float inter_foot_distance = fabs(right_foot_frame_pos_world[1] - left_foot_frame_pos_world[1]);
+			com_desired_velocity << -fmax(4, 4*0.1/inter_foot_distance), 0.0, 0.0;
 			// TODO: start accelerating COM upwards while maintaining tension between feet
 			// NOTE: simply accelerating upwards is not a good idea. Instead, 
 			// we might need to bend the knees first to lower the COM, and then accelerate it upwards
