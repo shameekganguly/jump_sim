@@ -426,7 +426,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 				// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
 				
 				// TODO: if COM velocity has been zero for a while, switch to FSMState::Jumping
-				if (left_foot_point_list.size() && right_foot_point_list.size() && com_v.array().abs().maxCoeff() < 1e-3) {
+				if (left_foot_point_list.size() && right_foot_point_list.size() && com_v.array().abs().maxCoeff() < 5e-3) {
 					if (stable_counter > STABLE_COUNT_THRESH) {
 						curr_state = FSMState::Jumping;
 						cout << "Switching from Balancing to Jumping" << endl;
@@ -453,7 +453,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 						if (F_contact[0] > -0.1 || F_contact[2] > -0.1) {
 							is_sticking = true;
 						}
-						else if (fabs(F_contact[1]/F_contact[0]) > 0.8 || fabs(F_contact[3]/F_contact[2]) > 0.8) {
+						else if (fabs(F_contact[1]/F_contact[0]) > 0.9 || fabs(F_contact[3]/F_contact[2]) > 0.9) {
 							is_slipping = true;
 						}
 					// } else if (left_foot_point_list.size()) {
@@ -494,7 +494,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 		if (curr_state == FSMState::Jumping) {
 			Eigen::Vector3d com_desired_velocity; // vx, vy, w
-			com_desired_velocity << -5, 0.0, 0.0;
+			com_desired_velocity << -4, 0.0, 0.0;
 			// TODO: start accelerating COM upwards while maintaining tension between feet
 			// NOTE: simply accelerating upwards is not a good idea. Instead, 
 			// we might need to bend the knees first to lower the COM, and then accelerate it upwards
