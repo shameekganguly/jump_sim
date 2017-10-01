@@ -65,7 +65,7 @@ int main (int argc, char** argv) {
 
 	// load simulation world
 	auto sim = new Simulation::Sai2Simulation(world_fname, Simulation::urdf, false);
-	sim->setCollisionRestitution(0.0);
+	sim->setCollisionRestitution(0.2);
  //    // set co-efficient of friction also to zero for now as this causes jitter
     sim->setCoeffFrictionStatic(1.0);
     sim->setCoeffFrictionDynamic(1.0);
@@ -74,8 +74,8 @@ int main (int argc, char** argv) {
 	q_home.setZero(dof);
 	q_home << -1.8, //0 floating_base_px
 				0.0,	//1 floating_base_py
-				// ((float) (rand() % 30 - 15)) /180.0*M_PI,	//2 floating_base_rz
-				0.0/180.0*M_PI,	//2 floating_base_rz
+				((float) (rand() % 30 - 15)) /180.0*M_PI,	//2 floating_base_rz
+				// 0.0/180.0*M_PI,	//2 floating_base_rz
 				60.0/180.0*M_PI,	//3 left thigh adduction
 				50.0/180.0*M_PI,	//4 left knee adduction
 				-15.0/180.0*M_PI,	//5 left foot adduction
@@ -165,6 +165,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	Eigen::VectorXd tau = Eigen::VectorXd::Zero(robot->dof());
 	Eigen::VectorXd temp_tau = Eigen::VectorXd::Zero(robot->dof());
 	Eigen::VectorXd tau_act = Eigen::VectorXd::Zero(robot->dof() - 3);
+	Eigen::VectorXd tau_act_passive = Eigen::VectorXd::Zero(robot->dof() - 3);
 	Eigen::VectorXd gj(robot->dof());
 	Eigen::MatrixXd selection_mat(robot->dof() - 3, robot->dof());
 	// cout << selection_mat << endl;
@@ -213,6 +214,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	Eigen::MatrixXd J_task;
 	Eigen::MatrixXd L_task;
 	Eigen::VectorXd F_task;
+	Eigen::VectorXd F_task_passive;
 	Eigen::MatrixXd J0_com(6, robot->dof());
 	Eigen::MatrixXd Jv_com(2, robot->dof()); //TODO: consider full 6-DOF com task?
 	Eigen::Vector3d com_pos;
@@ -250,6 +252,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	const uint JUMP_COUNT_THRESH = 7;
 
 	Eigen::VectorXd q_fall;
+
+	uint num_successful_jumps = 0;
 
 	// gains
 	double kplcom = 20.0; // COM linear kp
@@ -361,17 +365,9 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			// update support polygon centroid
 			size_t n_points_left = left_foot_point_list.size();
 			size_t n_points_right = right_foot_point_list.size();
-			size_t n_points = n_points_left + n_points_right;
 			if (n_points_left > 0 && n_points_right > 0) {
 				pos_support_centroid.setZero();
-				for(auto point: left_foot_point_list) {
-					pos_support_centroid += point;
-				}
-				for(auto point: right_foot_point_list) {
-					pos_support_centroid += point;
-				}
-				pos_support_centroid /= n_points;
-				// pos_support_centroid = (left_foot_point_list[0] + right_foot_point_list[0])*0.5;
+				pos_support_centroid[1] = (left_foot_frame_pos_world[1] + right_foot_frame_pos_world[1])*0.5;
 			}
 
 			// ... for debugging
@@ -404,7 +400,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		if (curr_state == FSMState::FallingMidAir) {
 			// simply compensate for gravity and brace for landing
 			q_fall = q_home.tail(act_dof);
-			q_fall[0] = q_home[3]*(1 - 2.0*fmax(0.0, fabs(robot->_q[2]) - (5.0/180.0*M_PI)));
+			q_fall[0] = q_home[3]*(1 - 2.5*fmax(0.0, fabs(robot->_q[2]) - (5.0/180.0*M_PI)));
 			q_fall[3] = -q_fall[0];
 			// tau_act = actuated_space_inertia*(-kpj*(robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*(robot->_dq.tail(act_dof)));
 			tau_act = actuated_space_inertia*(-kpj*(robot->_q.tail(act_dof) - q_fall) - kvj*(robot->_dq.tail(act_dof)));
@@ -503,12 +499,12 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			
 			// - compute task forces
 			com_v << Jv_com*robot->_dq, (robot->_dq)[2];
+			// cout << " Desired zmp pos " << pos_support_centroid[1] << endl;
 			com_pos_err << (com_pos[0] + des_com_height_balanced), (com_pos[1] - pos_support_centroid[1]), robot->_q[2];
 			//TODO: separate linear and angular parts in task force below
 			L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
 			F_task = L_task*(- kplcom*com_pos_err - kvlcom*com_v + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
-			// F_task = L_task*(J_task*robot->_M_inv*N_contact_both.transpose()*gj);
-
+			F_task_passive = L_task*(J_task*robot->_M_inv*N_contact_both.transpose()*gj);
 			// cout << "J_task " << endl << J_task << endl;
 			// cout << "L_task " << endl << L_task << endl;
 			// if (L_task(2,2) < 0.001) {
@@ -538,12 +534,31 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			tau_0_rhs.head(act_dof) = actuated_space_inertia_contact_inv_both*tau_act;
 			tau_0_rhs(act_dof) = 0; // left foot moment
 			tau_0_rhs(act_dof+1) = 0; // right foot moment
-			tau_0_rhs(act_dof+2) = 2 + feet_tension_projector_both_gravity.dot(gj); // internal tension between feet = 0
+			tau_0_rhs(act_dof+2) = 30 + feet_tension_projector_both_gravity.dot(gj); // internal tension between feet = 0
 			tau_0 = feet_null_projector_both_inv*tau_0_rhs;
 			// cout << "(SNs)^T*tau_act " << ((SN_contact_both).transpose()*tau_act).transpose() << endl;
 			// cout << "(SNs)^T*tau_0 " << ((SN_contact_both).transpose()*tau_0).transpose() << endl;
 			tau_act = tau_0;
 			
+			// - compute passive joint torques in case slippage/stickage is detected
+			tau_act_passive = actuated_space_projection_contact_both.transpose()*(J_task.transpose()*F_task_passive);
+			// tau_act += null_actuated_space_projection_contact*(actuated_space_projection_contact_both.transpose()*gj);
+			tau_act_passive += null_actuated_space_projection_contact*(
+				actuated_space_projection_contact_both.transpose()*gj + 
+				actuated_space_inertia_contact_both*(-kpj*4.0 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*2.0 * robot->_dq.tail(act_dof))
+			);
+			// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
+
+			// remove moments at the feet
+			tau_0_rhs.head(act_dof) = actuated_space_inertia_contact_inv_both*tau_act_passive;
+			tau_0_rhs(act_dof) = 0; // left foot moment
+			tau_0_rhs(act_dof+1) = 0; // right foot moment
+			tau_0_rhs(act_dof+2) = 30 + feet_tension_projector_both_gravity.dot(gj); // internal tension between feet = 0
+			tau_0 = feet_null_projector_both_inv*tau_0_rhs;
+			// cout << "(SNs)^T*tau_act " << ((SN_contact_both).transpose()*tau_act).transpose() << endl;
+			// cout << "(SNs)^T*tau_0 " << ((SN_contact_both).transpose()*tau_0).transpose() << endl;
+			tau_act_passive = tau_0;
+
 			// if COM velocity has been zero for a while, switch to FSMState::Jumping
 			// if (left_foot_point_list.size() && right_foot_point_list.size() && com_v.array().abs().maxCoeff() < 5e-3) {
 			if ((left_foot_point_list.size() || right_foot_point_list.size()) && com_v.array().abs().maxCoeff() < 5e-3) {
@@ -570,10 +585,10 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 				bool is_slipping = false;
 				// if (left_foot_point_list.size() && right_foot_point_list.size()) {
 					F_contact = -L_contact_both*J_c_both*robot->_M_inv*(temp_tau - gj);
-					if (F_contact[0] > -0.1 || F_contact[3] > -0.1) {
+					if (F_contact[0] > 0 || F_contact[3] > 0) {
 						is_sticking = true;
 					}
-					else if (fabs(F_contact[1]/F_contact[0]) > 0.8 || fabs(F_contact[4]/F_contact[3]) > 0.8) {
+					else if (fabs(F_contact[1]/F_contact[0]) > 0.9 || fabs(F_contact[4]/F_contact[3]) > 0.9) {
 						is_slipping = true;
 					}
 				// } else if (left_foot_point_list.size()) {
@@ -601,11 +616,13 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 					// if (right_foot_force_list.size()) {
 					// 	cout << "Actual right foot contact forces " << right_foot_force_list[0].transpose() << endl;
 					// }
-					tau_act.setZero(act_dof); //play safe
+					// tau_act.setZero(act_dof); //play safe
+					tau_act = tau_act_passive;
 				}
 				else if (is_slipping) {
 					// cout << "Slip detected " << F_contact.transpose() << endl;
-					tau_act.setZero(act_dof); //play safe
+					// tau_act.setZero(act_dof); //play safe
+					tau_act = tau_act_passive;
 				}
 			// }
 			// cout << "tau_act " << endl << tau_act << endl;
@@ -674,6 +691,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 				if (jump_counter > JUMP_COUNT_THRESH) {
 					curr_state = FSMState::FallingMidAir;
 					cout << "Switching from Jumping to FallingMidAir" << endl;
+					num_successful_jumps++;
+					cout << "Num jumps: " << num_successful_jumps << endl;
 					balance_counter = 0;
 				}
 				else {
