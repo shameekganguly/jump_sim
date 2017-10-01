@@ -334,7 +334,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			// J feet tension
 			left_to_right_foot_unit_vec = (right_foot_frame_pos_world - left_foot_frame_pos_world);
 			left_to_right_foot_unit_vec.normalize();
-			J_feet_tension = left_to_right_foot_unit_vec*(Jv_right_foot - Jv_left_foot);
+			J_feet_tension = left_to_right_foot_unit_vec.head(2).transpose()*(Jv_right_foot - Jv_left_foot);
 
 			// update support polygon centroid
 			size_t n_points = left_foot_point_list.size() + right_foot_point_list.size();
@@ -585,6 +585,11 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 			//TODO: separate linear and angular parts in task force below
 			F_task = L_task*( - kvlcom*(com_v - com_desired_velocity) + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
 			// cout << "F_task " << endl << F_task << endl;
+
+			if (robot->_q[4] < 0 || robot->_q[6] > 0) {
+				// only compensate for gravity beyond this point
+				F_task = L_task*(J_task*robot->_M_inv*N_contact_both.transpose()*gj);
+			}
 
 			// - compute posture torques
 			null_actuated_space_projection_contact = 
