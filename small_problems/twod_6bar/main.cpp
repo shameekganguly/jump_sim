@@ -570,7 +570,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 		if (curr_state == FSMState::Jumping) {
 			Eigen::Vector3d com_desired_velocity; // vx, vy, w
 			float inter_foot_distance = fabs(right_foot_frame_pos_world[1] - left_foot_frame_pos_world[1]);
-			com_desired_velocity << -fmax(4, 4*0.1/inter_foot_distance), 0.0, 0.0;
+			com_desired_velocity << -4.0*fmin(1.0, 0.6/inter_foot_distance), 0.0, 0.0;
 			// TODO: start accelerating COM upwards while maintaining tension between feet
 			// NOTE: simply accelerating upwards is not a good idea. Instead, 
 			// we might need to bend the knees first to lower the COM, and then accelerate it upwards
