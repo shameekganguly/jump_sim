@@ -237,6 +237,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 
 	Eigen::VectorXd q_fall;
 
+	uint num_successful_jumps = 0;
+
 	// gains
 	double kplcom = 20.0; // COM linear kp
 	double kvlcom = 10.0; // COM linear kv
@@ -501,6 +503,8 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 					if (stable_counter > STABLE_COUNT_THRESH) {
 						curr_state = FSMState::Jumping;
 						cout << "Switching from BalancingDoubleStance to Jumping" << endl;
+						num_successful_jumps++;
+						cout << "Num jumps: " << num_successful_jumps << endl;
 						// reset jump counter
 						jump_counter = 0;
 					}
