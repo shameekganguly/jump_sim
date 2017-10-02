@@ -774,7 +774,7 @@ GLFWwindow* glfwInitialize() {
 
     // create window and make it current
     glfwWindowHint(GLFW_VISIBLE, 0);
-    GLFWwindow* window = glfwCreateWindow(windowW, windowH, "SAI2.0 - 2D 6bar Jump Sim", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(windowW, windowH, "SAI2.0 - 2D 8bar Jump Sim", NULL, NULL);
 	glfwSetWindowPos(window, windowPosX, windowPosY);
 	glfwShowWindow(window);
     glfwMakeContextCurrent(window);
