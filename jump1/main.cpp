@@ -29,8 +29,8 @@ const string world_fname = "resources/jump1/world.urdf";
 const string robot_fname = "../resources/toro/toro.urdf";
 const string robot_name = "Toro";
 // string camera_name = "camera_side";
-// string camera_name = "camera_isometric";
-string camera_name = "camera_front";
+string camera_name = "camera_isometric";
+// string camera_name = "camera_front";
 // string camera_name = "camera_top";
 // string ee_link_name = "link6";
 
@@ -179,9 +179,9 @@ int main (int argc, char** argv) {
 
 	// initialize force sensor: needs Sai2Simulation sim interface type
 	left_foot_force_sensor = new ForceSensorSim(robot_name, left_foot_name, Eigen::Affine3d::Identity(), sim, robot);
-	left_foot_force_display = new ForceSensorDisplay(left_foot_force_sensor, graphics);
+	// left_foot_force_display = new ForceSensorDisplay(left_foot_force_sensor, graphics);
 	right_foot_force_sensor = new ForceSensorSim(robot_name, right_foot_name, Eigen::Affine3d::Identity(), sim, robot);
-	right_foot_force_display = new ForceSensorDisplay(right_foot_force_sensor, graphics);
+	// right_foot_force_display = new ForceSensorDisplay(right_foot_force_sensor, graphics);
 
 	// next start the control thread
 	thread ctrl_thread(control, robot, robot_rbdl, sim);
@@ -195,8 +195,8 @@ int main (int argc, char** argv) {
 		int width, height;
 		glfwGetFramebufferSize(window, &width, &height);
 		graphics->updateGraphics(robot_name, robot);
-		left_foot_force_display->update();
-		right_foot_force_display->update();
+		// left_foot_force_display->update();
+		// right_foot_force_display->update();
 		graphics->render(camera_name, width, height);
 		glfwSwapBuffers(window);
 		glFinish();
@@ -722,6 +722,16 @@ void keySelect(GLFWwindow* window, int key, int scancode, int action, int mods)
     {
         // change camera
         camera_name = "camera_side";
+    }
+    if ((key == '3') && action == GLFW_PRESS)
+    {
+        // change camera
+        camera_name = "camera_top";
+    }
+    if ((key == '4') && action == GLFW_PRESS)
+    {
+        // change camera
+        camera_name = "camera_isometric";
     }
 }
 
