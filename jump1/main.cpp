@@ -29,8 +29,8 @@ const string world_fname = "resources/jump1/world.urdf";
 const string robot_fname = "../resources/toro/toro.urdf";
 const string robot_name = "Toro";
 // string camera_name = "camera_side";
-string camera_name = "camera_isometric";
-// string camera_name = "camera_front";
+// string camera_name = "camera_isometric";
+string camera_name = "camera_front";
 // string camera_name = "camera_top";
 // string ee_link_name = "link6";
 
@@ -115,7 +115,7 @@ int main (int argc, char** argv) {
 
 	// load simulation world
 	auto sim = new Simulation::Sai2Simulation(world_fname, Simulation::urdf, false);
-	sim->setCollisionRestitution(0.0);
+	sim->setCollisionRestitution(0.1);
     // set co-efficient of friction also to zero for now as this causes jitter
     sim->setCoeffFrictionStatic(1.0);
     sim->setCoeffFrictionDynamic(1.0);
@@ -286,9 +286,14 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	Eigen::VectorXd F_task_passive;
 	Eigen::Vector3d com_pos;
 	Eigen::Vector3d com_pos_err;
+	Eigen::Vector3d torso_ang_err;
 	Eigen::Vector3d com_v;
+	Eigen::Vector3d torso_ang_v;
 	Eigen::MatrixXd J0_com(6, robot->dof());
 	Eigen::MatrixXd Jv_com(3, robot->dof());
+	Eigen::MatrixXd Jw_torso(3, robot->dof());
+	Eigen::Matrix3d rot_torso;
+	Eigen::Matrix3d rot_torso_des = Eigen::Matrix3d::Identity();
 	Eigen::MatrixXd Jw_left_foot(3, robot->dof());
 	Eigen::MatrixXd Jw_right_foot(3, robot->dof());
 	// Eigen::Matrix3d rot_left_foot;
@@ -314,6 +319,8 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	// gains
 	double kplcom = 20.0; // COM linear kp
 	double kvlcom = 10.0; // COM linear kv
+	double kpacom = 20.0; // COM angular kp
+	double kvacom = 10.0; // COM angular kv
 	double kpj = 20.0; // joint space kp
 	double kvj = 10.0; // joint space kv
 	double kpwleftf = 40; // left foot admittance kp for zero moment control
@@ -362,6 +369,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// cout << "Jv_left_foot " << endl << Jv_left_foot << endl;
 			robot->J_0(J0_right_foot, right_foot_name, right_foot_pos_local);
 			Jv_right_foot = J0_right_foot.block(0,0,3,dof);
+
 			// - J feet tension
 			robot->position(left_foot_frame_pos_world, left_foot_name, left_foot_pos_local);
 			// robot->rotation(rot_left_foot, left_foot_name);
@@ -370,6 +378,11 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			left_to_right_foot_unit_vec = (right_foot_frame_pos_world - left_foot_frame_pos_world);
 			left_to_right_foot_unit_vec.normalize();
 			J_feet_tension = left_to_right_foot_unit_vec.transpose()*(Jv_right_foot - Jv_left_foot);
+
+			// update torso angular parameters
+			robot->Jw(Jw_torso, torso_name);
+			// cout << "Jw_torso " << endl << Jw_torso << endl;
+			robot->rotation(rot_torso, torso_name);
 
 			// contact projections for both feet
 			J_c_both << J0_left_foot, J0_right_foot;
@@ -458,21 +471,28 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// TODO: start zero tension, COM stabilization and posture control to q_home
 
 			// - set the task Jacobian, project through the contact null-space
-			J_task.setZero(3, dof);
+			J_task.setZero(6, dof);
 			// J_task.block(0,0,2,dof) = Jv_com; // linear part
 			// J_task(2,2) = 1; // angular part
-			J_task = Jv_com;
+			J_task << Jv_com, Jw_torso;
 			// cout << "Jv_com " << endl << Jv_com << endl;
 			J_task = J_task * N_contact_both;
 			
 			// - compute task forces
-			com_v << Jv_com*robot->_dq;
+			com_v = Jv_com*robot->_dq;
+			torso_ang_v = Jw_torso*robot->_dq;
 			// cout << " Desired zmp pos " << pos_support_centroid.transpose() << endl;
 			com_pos_err << (com_pos[0] - pos_support_centroid[0]), (com_pos[1] - pos_support_centroid[1]), (com_pos[2] - des_com_height_balanced);
+			robot->orientationError(torso_ang_err, rot_torso_des, rot_torso);
+			// cout << "torso_ang_err " << torso_ang_err.transpose() << endl;
+			// cout << "torso_ang_v " << torso_ang_v.transpose() << endl;
 			//TODO: separate linear and angular parts in task force below
 			L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
-			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.5).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom*0.5).array()*com_v.array();
-			F_task = L_task*(acc_com_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
+			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.4).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom).array()*com_v.array();
+			Eigen::Vector3d acc_tor_ang_err = - kpacom*8.0*torso_ang_err.array() - kvacom*4.0*torso_ang_v.array();
+			Eigen::VectorXd acc_task_err(6);
+			acc_task_err << acc_com_err, acc_tor_ang_err;
+			F_task = L_task*(acc_task_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
 			F_task_passive = L_task*(J_task*robot->_M_inv*N_contact_both.transpose()*gj);
 			// cout << "J_task " << endl << J_task << endl;
 			// cout << "L_task_inv " << endl << J_task*robot->_M_inv*J_task.transpose() << endl;
@@ -495,7 +515,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// tau_act += null_actuated_space_projection_contact*(actuated_space_projection_contact_both.transpose()*gj);
 			tau_act += null_actuated_space_projection_contact*(
 				actuated_space_projection_contact_both.transpose()*gj + 
-				actuated_space_inertia_contact_both*(-kpj*0.1 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*0.1 * robot->_dq.tail(act_dof))
+				actuated_space_inertia_contact_both*(-kpj*0.2 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*0.5 * robot->_dq.tail(act_dof))
 			);
 			// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
 
@@ -510,7 +530,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			tau_0_rhs(act_dof+1) = 0 + feet_internal_force_projected_both_gravity(1); // left foot moment y
 			tau_0_rhs(act_dof+2) = 0 + feet_internal_force_projected_both_gravity(2); // right foot moment x
 			tau_0_rhs(act_dof+3) = 0 + feet_internal_force_projected_both_gravity(3); // right foot moment y
-			tau_0_rhs(act_dof+4) = 0 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+			tau_0_rhs(act_dof+4) = 30 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
 			tau_0_rhs(act_dof+5) = 0 + feet_internal_force_projected_both_gravity(5); // internal moment between feet = 0
 			tau_0 = feet_null_projector_both_inv*tau_0_rhs;
 			// cout << "actuated_space_inertia_contact_inv_both*tau_act " << ((actuated_space_inertia_contact_inv_both)*tau_act).transpose() << endl;
@@ -532,7 +552,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			tau_0_rhs(act_dof+1) = 0 + feet_internal_force_projected_both_gravity(1); // left foot moment y
 			tau_0_rhs(act_dof+2) = 0 + feet_internal_force_projected_both_gravity(2); // right foot moment x
 			tau_0_rhs(act_dof+3) = 0 + feet_internal_force_projected_both_gravity(3); // right foot moment y
-			tau_0_rhs(act_dof+4) = 0 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+			tau_0_rhs(act_dof+4) = 30 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
 			tau_0_rhs(act_dof+5) = 0 + feet_internal_force_projected_both_gravity(5); // internal moment between feet = 0
 			tau_0 = feet_null_projector_both_inv*tau_0_rhs;
 			// cout << "(SNs)^T*tau_act_passive " << ((SN_contact_both).transpose()*tau_act_passive).transpose() << endl;
