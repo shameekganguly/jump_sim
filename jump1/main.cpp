@@ -28,9 +28,9 @@ using namespace Eigen;
 const string world_fname = "resources/jump1/world.urdf";
 const string robot_fname = "../resources/toro/toro.urdf";
 const string robot_name = "Toro";
-// string camera_name = "camera_side";
+string camera_name = "camera_side";
 // string camera_name = "camera_isometric";
-string camera_name = "camera_front";
+// string camera_name = "camera_front";
 // string camera_name = "camera_top";
 // string ee_link_name = "link6";
 
@@ -115,7 +115,7 @@ int main (int argc, char** argv) {
 
 	// load simulation world
 	auto sim = new Simulation::Sai2Simulation(world_fname, Simulation::urdf, false);
-	sim->setCollisionRestitution(0.1);
+	sim->setCollisionRestitution(0.0);
     // set co-efficient of friction also to zero for now as this causes jitter
     sim->setCoeffFrictionStatic(1.0);
     sim->setCoeffFrictionDynamic(1.0);
@@ -489,7 +489,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			//TODO: separate linear and angular parts in task force below
 			L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
 			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.4).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom).array()*com_v.array();
-			Eigen::Vector3d acc_tor_ang_err = - kpacom*8.0*torso_ang_err.array() - kvacom*4.0*torso_ang_v.array();
+			Eigen::Vector3d acc_tor_ang_err = - kpacom*1.0*torso_ang_err.array() - kvacom*4.0*torso_ang_v.array();
 			Eigen::VectorXd acc_task_err(6);
 			acc_task_err << acc_com_err, acc_tor_ang_err;
 			F_task = L_task*(acc_task_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
@@ -515,7 +515,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// tau_act += null_actuated_space_projection_contact*(actuated_space_projection_contact_both.transpose()*gj);
 			tau_act += null_actuated_space_projection_contact*(
 				actuated_space_projection_contact_both.transpose()*gj + 
-				actuated_space_inertia_contact_both*(-kpj*0.2 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*0.5 * robot->_dq.tail(act_dof))
+				actuated_space_inertia_contact_both*(-kpj*0.1 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*0.3 * robot->_dq.tail(act_dof))
 			);
 			// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
 
@@ -542,7 +542,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// tau_act += null_actuated_space_projection_contact*(actuated_space_projection_contact_both.transpose()*gj);
 			tau_act_passive += null_actuated_space_projection_contact*(
 				actuated_space_projection_contact_both.transpose()*gj + 
-				actuated_space_inertia_contact_both*(-kpj*0.0 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*0.1 * robot->_dq.tail(act_dof))
+				actuated_space_inertia_contact_both*(-kpj*0.1 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*0.3 * robot->_dq.tail(act_dof))
 			);
 			// // tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
 
