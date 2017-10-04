@@ -568,7 +568,11 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 					if (F_contact[2] < 0 || F_contact[8] < 0) {
 						is_sticking = true;
 					}
-					else if (fabs(F_contact[1]/F_contact[0]) > 0.9 || fabs(F_contact[7]/F_contact[6]) > 0.9) {
+					else if (
+						fabs(F_contact[1]/F_contact[2]) > 0.9 ||
+						fabs(F_contact[0]/F_contact[2]) > 0.9 || 
+						fabs(F_contact[7]/F_contact[8]) > 0.9 ||
+						fabs(F_contact[6]/F_contact[8]) > 0.9) {
 						is_slipping = true;
 					}
 				// } else if (left_foot_point_list.size()) {
