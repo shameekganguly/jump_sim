@@ -412,6 +412,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 
 		// pause simulation if com velocity exceeds threshold
 		if ((Jv_com*robot->_dq).norm() > 2) {
+		cout << "Global pause as COM speed exceeded " << endl;
 			f_global_sim_pause = true;
 			continue;
 		}
@@ -480,9 +481,9 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// 	f_global_sim_pause = true;
 			// 	cout << "Global pause " << endl;
 			// }
-			cout << "com_v " << endl << com_v.transpose() << endl;
-			cout << "com_pos_err " << endl << com_pos_err.transpose() << endl;
-			cout << "F_task " << endl << F_task.transpose() << endl;
+			// cout << "com_v " << endl << com_v.transpose() << endl;
+			// cout << "com_pos_err " << endl << com_pos_err.transpose() << endl;
+			// cout << "F_task " << endl << F_task.transpose() << endl;
 			// cout << "F_task_passive " << endl << F_task_passive.transpose() << endl;
 
 			// - compute posture torques
@@ -494,7 +495,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// tau_act += null_actuated_space_projection_contact*(actuated_space_projection_contact_both.transpose()*gj);
 			tau_act += null_actuated_space_projection_contact*(
 				actuated_space_projection_contact_both.transpose()*gj + 
-				actuated_space_inertia_contact_both*(-kpj*0.0 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*0.1 * robot->_dq.tail(act_dof))
+				actuated_space_inertia_contact_both*(-kpj*0.1 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*0.1 * robot->_dq.tail(act_dof))
 			);
 			// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
 
@@ -564,15 +565,15 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 				bool is_slipping = false;
 				// if (left_foot_point_list.size() && right_foot_point_list.size()) {
 					F_contact = -L_contact_both*J_c_both*robot->_M_inv*(temp_tau - gj);
-					cout << "Expected F contact: " << F_contact.transpose() << endl;
+					double F_contact_plane_left = Eigen::Vector2d(F_contact[0], F_contact[1]).norm();
+					double F_contact_plane_right = Eigen::Vector2d(F_contact[6], F_contact[7]).norm();
+					// cout << "Expected F contact: " << F_contact.transpose() << endl;
 					if (F_contact[2] < 0 || F_contact[8] < 0) {
 						is_sticking = true;
 					}
 					else if (
-						fabs(F_contact[1]/F_contact[2]) > 0.9 ||
-						fabs(F_contact[0]/F_contact[2]) > 0.9 || 
-						fabs(F_contact[7]/F_contact[8]) > 0.9 ||
-						fabs(F_contact[6]/F_contact[8]) > 0.9) {
+						fabs(F_contact_plane_left/F_contact[2]) > 0.8 ||
+						fabs(F_contact_plane_right/F_contact[8]) > 0.8) {
 						is_slipping = true;
 					}
 				// } else if (left_foot_point_list.size()) {
@@ -609,7 +610,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 					tau_act = tau_act_passive;
 				}
 			// }
-			cout << "tau_act " << endl << tau_act.transpose() << endl;
+			// cout << "tau_act " << endl << tau_act.transpose() << endl;
 		}
 
 		if (curr_state == FSMState::Jumping) {
