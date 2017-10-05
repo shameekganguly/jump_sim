@@ -307,6 +307,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	Eigen::Vector3d left_foot_frame_pos_world; // position of left foot frame
 	Eigen::Vector3d right_foot_frame_pos_world; // position of right foot frame
 	Eigen::MatrixXd J_feet_tension(1, robot->dof());
+	double feet_distance;
 	Eigen::Vector3d left_to_right_foot_unit_vec;
 	Eigen::Vector3d pos_support_centroid;
 	Eigen::MatrixXd J_c_both(12, robot->dof());
@@ -328,6 +329,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	double kvwleftf = 10; // left foot kv damping
 	double kpwrightf = 40; // right foot admittance kp for zero moment control
 	double kvwrightf = 10; // right foot kv damping
+	double kpfeetdistance = 50; // gain to map internal tension between feet from distance between them
 
 	// constant parameters
 	const double des_com_height_balanced = 0.8; // computed from above
@@ -377,6 +379,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// cout << "rot_left_foot " << endl << rot_left_foot << endl;
 			robot->position(right_foot_frame_pos_world, right_foot_name, right_foot_pos_local);
 			left_to_right_foot_unit_vec = (right_foot_frame_pos_world - left_foot_frame_pos_world);
+			feet_distance = left_to_right_foot_unit_vec.norm();
 			left_to_right_foot_unit_vec.normalize();
 			J_feet_tension = left_to_right_foot_unit_vec.transpose()*(Jv_right_foot - Jv_left_foot);
 
@@ -523,16 +526,21 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 
 			// cout << "tau_act before internal forces correction: " << tau_act.transpose() << endl;
 
+			// calculate feet stabilizing forces
+			double des_feet_tension = kpfeetdistance*(feet_distance - 0.75);
+			// cout << "des_feet_tension " << des_feet_tension << endl;
+
 			// remove moments at the feet
 			// cout << "feet_internal_force_projected_both_gravity: " << feet_internal_force_projected_both_gravity.transpose() << endl;
 			Eigen::VectorXd tau_0(act_dof);
 			Eigen::VectorXd tau_0_rhs(act_dof+6);
+
 			tau_0_rhs.head(act_dof) = actuated_space_inertia_contact_inv_both*tau_act;
 			tau_0_rhs(act_dof) = 0 + feet_internal_force_projected_both_gravity(0); // left foot moment x
 			tau_0_rhs(act_dof+1) = 0 + feet_internal_force_projected_both_gravity(1); // left foot moment y
 			tau_0_rhs(act_dof+2) = 0 + feet_internal_force_projected_both_gravity(2); // right foot moment x
 			tau_0_rhs(act_dof+3) = 0 + feet_internal_force_projected_both_gravity(3); // right foot moment y
-			tau_0_rhs(act_dof+4) = 0 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+			tau_0_rhs(act_dof+4) = des_feet_tension + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
 			tau_0_rhs(act_dof+5) = 0 + feet_internal_force_projected_both_gravity(5); // internal moment between feet = 0
 			tau_0 = feet_null_projector_both_inv*tau_0_rhs;
 			// cout << "actuated_space_inertia_contact_inv_both*tau_act " << ((actuated_space_inertia_contact_inv_both)*tau_act).transpose() << endl;
