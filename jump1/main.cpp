@@ -86,6 +86,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
 
 bool f_global_sim_pause = false; // use with caution!
+// bool f_global_sim_pause = true; // use with caution!
 
 // initialize window manager
 GLFWwindow* glfwInitialize();
@@ -131,9 +132,9 @@ int main (int argc, char** argv) {
 				-30.0/180.0*M_PI,	//6 right thigh adduction
 				-45.0/180.0*M_PI,	//7 right thigh pitch
 				-15/180.0*M_PI,	//8 right knee roll
-				75/180.0*M_PI,	//9 right knee pitch
+				82/180.0*M_PI,	//9 right knee pitch
 				15/180.0*M_PI,	//10 right ankle adduction
-				-15/180.0*M_PI,	//11 right ankle pitch - axis incorrect
+				-15/180.0*M_PI,	//11 right ankle pitch
 				0/180.0*M_PI,	//12 trunk roll
 				-15/180.0*M_PI,	//13 right shoulder pitch
 				45/180.0*M_PI,	//14 right shoulder adduction
@@ -148,13 +149,13 @@ int main (int argc, char** argv) {
 				30/180.0*M_PI,	//23 left elbow roll
 				0/180.0*M_PI,	//24 left hand adduction - axis incorrect
 				0/180.0*M_PI,	//25 neck roll
-				0/180.0*M_PI,	//26 neck pitch - axis incorrect
+				30/180.0*M_PI,	//26 neck pitch
 				30/180.0*M_PI,	//27 left thigh adduction
 				-45/180.0*M_PI,	//28 left thigh pitch
 				15/180.0*M_PI,	//29 left knee roll
-				75/180.0*M_PI,	//30 left knee pitch
+				82/180.0*M_PI,	//30 left knee pitch
 				-15/180.0*M_PI,	//31 left ankle adduction
-				-15/180.0*M_PI;	//32 left ankle pitch - axis incorrect
+				-15/180.0*M_PI;	//32 left ankle pitch
 	robot->_q = q_home;
 	sim->setJointPositions(robot_name, robot->_q);
 	robot->updateModel();
@@ -301,8 +302,8 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	Eigen::MatrixXd J0_right_foot(6, robot->dof());
 	Eigen::MatrixXd Jv_left_foot(3, robot->dof());
 	Eigen::MatrixXd Jv_right_foot(3, robot->dof());
-	const Vector3d left_foot_pos_local(0.0, 0.0, -0.02); //TODO: tune this from actual foot contact point data 
-	const Vector3d right_foot_pos_local(0.0, 0.0, -0.02);
+	const Vector3d left_foot_pos_local(0.01, 0.0, -0.05); //TODO: tune this from actual foot contact point data 
+	const Vector3d right_foot_pos_local(0.01, 0.0, -0.05);
 	Eigen::Vector3d left_foot_frame_pos_world; // position of left foot frame
 	Eigen::Vector3d right_foot_frame_pos_world; // position of right foot frame
 	Eigen::MatrixXd J_feet_tension(1, robot->dof());
@@ -329,7 +330,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	double kvwrightf = 10; // right foot kv damping
 
 	// constant parameters
-	const double des_com_height_balanced = 0.9; // computed from above
+	const double des_com_height_balanced = 0.8; // computed from above
 
 	while (fSimulationRunning) { //automatically set to false when simulation is quit
 		fTimerDidSleep = timer.waitForNextLoop();
@@ -472,9 +473,9 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 
 			// - set the task Jacobian, project through the contact null-space
 			J_task.setZero(6, dof);
-			// J_task.block(0,0,2,dof) = Jv_com; // linear part
-			// J_task(2,2) = 1; // angular part
+			// J_task.setZero(3, dof);
 			J_task << Jv_com, Jw_torso;
+			// J_task << Jv_com;
 			// cout << "Jv_com " << endl << Jv_com << endl;
 			J_task = J_task * N_contact_both;
 			
@@ -488,11 +489,12 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// cout << "torso_ang_v " << torso_ang_v.transpose() << endl;
 			//TODO: separate linear and angular parts in task force below
 			L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
-			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.4).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom).array()*com_v.array();
-			Eigen::Vector3d acc_tor_ang_err = - kpacom*1.0*torso_ang_err.array() - kvacom*4.0*torso_ang_v.array();
+			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.5).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom).array()*com_v.array();
+			Eigen::Vector3d acc_tor_ang_err = - kpacom*torso_ang_err.array() - kvacom*torso_ang_v.array();
 			Eigen::VectorXd acc_task_err(6);
 			acc_task_err << acc_com_err, acc_tor_ang_err;
 			F_task = L_task*(acc_task_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
+			// F_task = L_task*(acc_com_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
 			F_task_passive = L_task*(J_task*robot->_M_inv*N_contact_both.transpose()*gj);
 			// cout << "J_task " << endl << J_task << endl;
 			// cout << "L_task_inv " << endl << J_task*robot->_M_inv*J_task.transpose() << endl;
@@ -530,7 +532,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			tau_0_rhs(act_dof+1) = 0 + feet_internal_force_projected_both_gravity(1); // left foot moment y
 			tau_0_rhs(act_dof+2) = 0 + feet_internal_force_projected_both_gravity(2); // right foot moment x
 			tau_0_rhs(act_dof+3) = 0 + feet_internal_force_projected_both_gravity(3); // right foot moment y
-			tau_0_rhs(act_dof+4) = 30 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+			tau_0_rhs(act_dof+4) = 0 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
 			tau_0_rhs(act_dof+5) = 0 + feet_internal_force_projected_both_gravity(5); // internal moment between feet = 0
 			tau_0 = feet_null_projector_both_inv*tau_0_rhs;
 			// cout << "actuated_space_inertia_contact_inv_both*tau_act " << ((actuated_space_inertia_contact_inv_both)*tau_act).transpose() << endl;
@@ -552,7 +554,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			tau_0_rhs(act_dof+1) = 0 + feet_internal_force_projected_both_gravity(1); // left foot moment y
 			tau_0_rhs(act_dof+2) = 0 + feet_internal_force_projected_both_gravity(2); // right foot moment x
 			tau_0_rhs(act_dof+3) = 0 + feet_internal_force_projected_both_gravity(3); // right foot moment y
-			tau_0_rhs(act_dof+4) = 30 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+			tau_0_rhs(act_dof+4) = 0 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
 			tau_0_rhs(act_dof+5) = 0 + feet_internal_force_projected_both_gravity(5); // internal moment between feet = 0
 			tau_0 = feet_null_projector_both_inv*tau_0_rhs;
 			// cout << "(SNs)^T*tau_act_passive " << ((SN_contact_both).transpose()*tau_act_passive).transpose() << endl;

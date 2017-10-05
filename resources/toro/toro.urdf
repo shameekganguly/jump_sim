@@ -281,18 +281,21 @@
     <link name="RL_foot">
          <tcp number="0"/>
         <inertial>
-            <origin xyz="-0.0012549156 -0.0000424296 0.0453354" rpy="0 0 0" />
+            <!-- <origin xyz="-0.0012549156 -0.0000424296 0.0453354" rpy="0 0 0" /> -->
+            <origin xyz="0.02 0.0 -0.045" rpy="0 0 0" />
             <mass value="1.4241951000" />
             <inertia  ixx="0.0039254437" iyy="0.0056384521" izz="0.0049198016" ixy="-0.0000052044" ixz="0.0014223826" iyz="0.0000040064" />
         </inertial>     
         <visual>
-            <origin xyz="0.04 0 0" />
+            <!-- <origin xyz="0.04 0 0" /> -->
+            <origin xyz="0.04 0 -0.08" />
             <geometry>
                 <mesh filename="meshes/obj/foot.stl.obj"/>
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0.04 0 0" />
+            <!-- <origin xyz="0.04 0 0" /> -->
+            <origin xyz="0.04 0 -0.08" />
             <geometry>
                 <mesh filename="meshes/obj/foot.stl.obj"/>
             </geometry>
@@ -324,7 +327,8 @@
     </link>
 
     <joint name="j6" type="revolute">
-        <origin xyz="-0.0000000000 -0.0000000000 -0.1189000000" rpy="0 0 0" />
+        <!-- <origin xyz="-0.0000000000 -0.0000000000 -0.1189000000" rpy="0 0 0" /> -->
+        <origin xyz="-0.0000000000 0.0000000000 -0.0200000" rpy="0 0 0" />
         <parent link="RL_ankle"/>
         <child link="RL_foot"/> 
         <limit lower="-0.7804" upper="0.7804" effort="165" velocity="3.0718" />
@@ -480,18 +484,21 @@
          <tcp number="1"/>
         <tcp number="1"/> 
         <inertial>
-            <origin xyz="-0.0012549156 0.0000424296 0.0453354" rpy="0 0 0" />
+            <!-- <origin xyz="-0.0012549156 0.0000424296 0.0453354" rpy="0 0 0" /> -->
+            <origin xyz="0.02 0.0 -0.045" rpy="0 0 0" />
             <mass value="1.4241951000" />
             <inertia  ixx="0.0039235265" iyy="0.0056313673" izz="0.0049161089" ixy="0.0000049045" ixz="0.0014182543" iyz="-0.0000046132" />
         </inertial>
         <visual>
-            <origin xyz="0.04 0 0" />
+            <!-- <origin xyz="0.04 0 0" /> -->
+            <origin xyz="0.04 0 -0.08" />
             <geometry>
                 <mesh filename="meshes/obj/foot.stl.obj"/>
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0.04 0 0" />
+            <!-- <origin xyz="0.04 0 0" /> -->
+            <origin xyz="0.04 0 -0.08" />
             <geometry>
                 <mesh filename="meshes/obj/foot.stl.obj"/>
                 <!-- <box size="0.05 0.05 0.01" /> -->
@@ -524,7 +531,8 @@
     </link>
 
     <joint name="j12" type="revolute">
-        <origin xyz="-0.0000000000 0.0000000000 -0.1189000000" rpy="0 0 0" />
+        <!-- <origin xyz="-0.0000000000 0.0000000000 -0.1189000000" rpy="0 0 0" /> -->
+        <origin xyz="-0.0000000000 0.0000000000 -0.0200000" rpy="0 0 0" />
         <parent link="LL_ankle"/>
         <child link="LL_foot"/> 
         <limit lower="-0.7854" upper="0.7854" effort="165" velocity="3.0718" />
@@ -1051,12 +1059,14 @@
     <link name="neck_link2">
         <tcp number="4"/>
          <inertial>
-            <origin xyz="-0.0602418 -0.0022724753 -0.0231339" rpy="0 0 0" />
+            <!-- <origin xyz="-0.0602418 -0.0022724753 -0.0231339" rpy="0 0 0" /> -->
+            <origin xyz="0.00 0.0 0.08" rpy="0 0 0" />
             <mass value="1.4522900000" />
             <inertia  ixx="0.0048135662" iyy="0.0059177034" izz="0.0067590509" ixy="-0.0000203783" ixz="-0.0006221121" iyz="0.0000996016" />
         </inertial>
          <visual>
-            <origin  xyz="-0.092 0 -0.1387"/>
+            <!-- <origin  xyz="-0.092 0 -0.1387"/> -->
+            <origin  xyz="0.0 0 0.0"/>
             <geometry>
                 <mesh filename="meshes/obj/head.stl.obj"/>
             </geometry>
@@ -1075,7 +1085,8 @@
     </link>
 
     <joint name="j27" type="revolute">
-        <origin xyz="0.056 0 0.1877"/>
+        <!-- <origin xyz="0.056 0 0.1877"/> -->
+        <origin xyz="-0.035 0 0.05"/>
         <parent link="neck_link1"/>
         <child link="neck_link2"/> 
         <limit lower="-0.5236" upper="1.5708" effort="8.4" velocity="4.7124" /> 
