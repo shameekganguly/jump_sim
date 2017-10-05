@@ -26,7 +26,7 @@ using namespace std;
 using namespace Eigen;
 
 const string world_fname = "resources/jump1/world.urdf";
-const string robot_fname = "../resources/toro/toro.urdf";
+const string robot_fname = "../resources/toro/toro_headless.urdf";
 const string robot_name = "Toro";
 string camera_name = "camera_side";
 // string camera_name = "camera_isometric";
@@ -67,7 +67,7 @@ static const string arr[] = {
 	"la_link5",
 	"la_link6",
 	"neck_link1",
-	"neck_link2"
+	// "neck_link2"
 };
 vector<string> link_names (arr, arr + sizeof(arr) / sizeof(arr[0]) );
 
@@ -149,7 +149,7 @@ int main (int argc, char** argv) {
 				30/180.0*M_PI,	//23 left elbow roll
 				0/180.0*M_PI,	//24 left hand adduction - axis incorrect
 				0/180.0*M_PI,	//25 neck roll
-				30/180.0*M_PI,	//26 neck pitch
+				// 30/180.0*M_PI,	//26 neck pitch
 				30/180.0*M_PI,	//27 left thigh adduction
 				-45/180.0*M_PI,	//28 left thigh pitch
 				15/180.0*M_PI,	//29 left knee roll
@@ -318,10 +318,10 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	const uint BALANCE_COUNT_THRESH = 11;
 
 	// gains
-	double kplcom = 20.0; // COM linear kp
-	double kvlcom = 10.0; // COM linear kv
-	double kpacom = 20.0; // COM angular kp
-	double kvacom = 10.0; // COM angular kv
+	double kplcom = 15.0; // COM linear kp
+	double kvlcom = 5.0; // COM linear kv
+	double kpacom = 15.0; // COM angular kp
+	double kvacom = 5.0; // COM angular kv
 	double kpj = 20.0; // joint space kp
 	double kvj = 10.0; // joint space kv
 	double kpwleftf = 40; // left foot admittance kp for zero moment control
