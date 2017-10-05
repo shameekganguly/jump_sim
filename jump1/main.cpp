@@ -225,7 +225,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	// create a timer
 	LoopTimer timer;
 	timer.initializeTimer();
-	timer.setLoopFrequency(500); //500Hz timer
+	timer.setLoopFrequency(1000); //1000Hz timer
 	double last_time = timer.elapsedTime(); //secs
 
 	// controller state variables
@@ -658,7 +658,7 @@ void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 	// create a timer
 	LoopTimer timer;
 	timer.initializeTimer();
-	timer.setLoopFrequency(1000); //1kHz timer
+	timer.setLoopFrequency(1500); //1.5kHz timer
 	double last_time = timer.elapsedTime(); //secs
 
 	bool fTimerDidSleep = true;
