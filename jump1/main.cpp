@@ -317,14 +317,18 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	Eigen::VectorXd F_contact;
 	uint balance_counter = 0;
 	const uint BALANCE_COUNT_THRESH = 11;
+	uint stable_counter;
+	const uint STABLE_COUNT_THRESH = 31;
+	uint jump_counter;
+	const uint JUMP_COUNT_THRESH = 5;
 
 	// gains
 	double kplcom = 15.0; // COM linear kp
 	double kvlcom = 5.0; // COM linear kv
 	double kpacom = 15.0; // COM angular kp
 	double kvacom = 5.0; // COM angular kv
-	double kpj = 20.0; // joint space kp
-	double kvj = 10.0; // joint space kv
+	double kpj = 70.0; // joint space kp
+	double kvj = 30.0; // joint space kv
 	double kpwleftf = 40; // left foot admittance kp for zero moment control
 	double kvwleftf = 10; // left foot kv damping
 	double kpwrightf = 40; // right foot admittance kp for zero moment control
@@ -332,7 +336,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	double kpfeetdistance = 50; // gain to map internal tension between feet from distance between them
 
 	// constant parameters
-	const double des_com_height_balanced = 0.8; // computed from above
+	const double des_com_height_balanced = 0.86; // computed from above
 
 	while (fSimulationRunning) { //automatically set to false when simulation is quit
 		fTimerDidSleep = timer.waitForNextLoop();
@@ -351,6 +355,16 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		// get all contact points from the sim
 		sim->getContactList(left_foot_point_list, left_foot_force_list, robot_name, left_foot_name);
 		sim->getContactList(right_foot_point_list, right_foot_force_list, robot_name, right_foot_name);
+
+		// some times there is a bug where the point list does not get updated correctly. So we have
+		// to add a hack to ensure that the list is empty when we are sure that the robot is not on the 
+		// ground
+		if (right_foot_frame_pos_world[2] > 0.1 && left_foot_frame_pos_world[2] > 0.1) {
+			left_foot_point_list.clear();
+			left_foot_force_list.clear();
+			right_foot_point_list.clear();
+			right_foot_force_list.clear();
+		}
 
 		// update model every once in a while
 		// TODO: this should be in a separate thread
@@ -428,7 +442,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		}
 
 		// pause simulation if com velocity exceeds threshold
-		if ((Jv_com*robot->_dq).norm() > 2) {
+		if ((Jv_com*robot->_dq).norm() > 2 && curr_state == FSMState::Balancing) {
 		cout << "Global pause as COM speed exceeded " << endl;
 			f_global_sim_pause = true;
 			continue;
@@ -448,13 +462,13 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		tau_act.setZero();
 		if (curr_state == FSMState::FallingMidAir) {
 			// simply compensate for gravity and brace for landing
-			tau_act = actuated_space_inertia*(-kpj*(robot->_q.tail(act_dof)- q_home.tail(act_dof)) - kvj*(robot->_dq.tail(act_dof)));
+			tau_act = actuated_space_inertia*(-kpj*2*(robot->_q.tail(act_dof)- q_home.tail(act_dof)) - kvj*(robot->_dq.tail(act_dof)));
 			tau_act += actuated_space_projection*gj;
 			// TODO: check for contact and switch to FSMState::Balancing
-			if (left_foot_point_list.size() || right_foot_point_list.size()) {
+			if ((left_foot_point_list.size() || right_foot_point_list.size()) && robot->_dq[2] < 0) {
 				if (balance_counter > BALANCE_COUNT_THRESH) {
-					// // reset the stable balance counter
-					// stable_counter = 0;
+					// reset the stable balance counter
+					stable_counter = 0;
 					// if (fabs(robot->_q[2]) > 7.0/180.0*M_PI) {
 					// 	//^^ poor posture, switch to single support stance
 					// 	curr_state = FSMState::BalancingSingleStance;
@@ -571,19 +585,19 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 
 			// if COM velocity has been zero for a while, switch to FSMState::Jumping
 			// if (left_foot_point_list.size() && right_foot_point_list.size() && com_v.array().abs().maxCoeff() < 5e-3) {
-			// if ((left_foot_point_list.size() || right_foot_point_list.size()) && com_v.array().abs().maxCoeff() < 5e-3) {
-			// 	if (stable_counter > STABLE_COUNT_THRESH) {
-			// 		curr_state = FSMState::Jumping;
-			// 		cout << "Switching from BalancingDoubleStance to Jumping" << endl;
-			// 		// reset jump counter
-			// 		jump_counter = 0;
-			// 	}
-			// 	else {
-			// 		stable_counter++;
-			// 	}
-			// } else {
-			// 	stable_counter = 0;
-			// }
+			if ((left_foot_point_list.size() || right_foot_point_list.size()) && com_v.array().abs().maxCoeff() < 5e-3) {
+				if (stable_counter > STABLE_COUNT_THRESH) {
+					curr_state = FSMState::Jumping;
+					cout << "Switching from BalancingDoubleStance to Jumping" << endl;
+					// reset jump counter
+					jump_counter = 0;
+				}
+				else {
+					stable_counter++;
+				}
+			} else {
+				stable_counter = 0;
+			}
 
 			// check friction cone constraint only if in two point support. Ok to slip a bit in single point support
 			// if (left_foot_point_list.size() || right_foot_point_list.size()) {
@@ -644,8 +658,106 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		}
 
 		if (curr_state == FSMState::Jumping) {
-			// TODO: start accelerating COM upwards while maintaining tension between feet
-			// TODO: when contact is lost, switch to FSMState::FallingMidAir
+			// start accelerating COM upwards while maintaining tension between feet
+			Eigen::Vector3d com_desired_velocity; // vx, vy, vz
+			com_desired_velocity << -0.05, 0.0, 1.5*fmin(1.0, 0.75/feet_distance);
+			Eigen::Vector3d torso_desired_ang_v; // wx, wy, wz
+			torso_desired_ang_v << 0.0, -4.0, 0.0;
+
+			// - set the task Jacobian, project through the contact null-space
+			J_task.setZero(6, dof);
+			// J_task.setZero(3, dof);
+			J_task << Jv_com, Jw_torso;
+			// J_task << Jv_com;
+			// cout << "Jv_com " << endl << Jv_com << endl;
+			J_task = J_task * N_contact_both;
+			
+			// - compute task forces
+			com_v = Jv_com*robot->_dq;
+			torso_ang_v = Jw_torso*robot->_dq;
+			// cout << " Desired zmp pos " << pos_support_centroid.transpose() << endl;
+			com_pos_err << (com_pos[0] - pos_support_centroid[0]), (com_pos[1] - pos_support_centroid[1]), 0.0;
+			robot->orientationError(torso_ang_err, rot_torso_des, rot_torso);
+			// cout << "torso_ang_err " << torso_ang_err.transpose() << endl;
+			// cout << "torso_ang_v " << torso_ang_v.transpose() << endl;
+			//TODO: separate linear and angular parts in task force below
+			L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
+			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.5).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom*2.0).array()*(com_v - com_desired_velocity).array();
+			Eigen::Vector3d acc_tor_ang_err = - kpacom*0.0*torso_ang_err.array() - kvacom*2.0*(torso_ang_v - torso_desired_ang_v).array();
+			Eigen::VectorXd acc_task_err(6);
+			acc_task_err << acc_com_err, acc_tor_ang_err;
+			F_task = L_task*(acc_task_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
+
+			// if knee pitch exceeds a certain angle, switch to fall controller
+			if (robot->_q[9] < 30.0/180.0*M_PI || robot->_q[29] < 30.0/180.0*M_PI) {
+				// TODO: check thigh pitch as well?
+				curr_state = FSMState::FallingMidAir;
+				cout << "Switching from Jumping to FallingMidAir" << endl;
+			}
+			// alternatively, when contact is lost, switch to FSMState::FallingMidAir
+			if (left_foot_point_list.size() == 0 && right_foot_point_list.size() == 0) {
+				if (jump_counter > JUMP_COUNT_THRESH) {
+					curr_state = FSMState::FallingMidAir;
+					cout << "Switching from Jumping to FallingMidAir" << endl;
+					// num_successful_jumps++;
+					// cout << "Num jumps: " << num_successful_jumps << endl;
+					balance_counter = 0;
+				}
+				else {
+					jump_counter++;
+				}
+			} else {
+				jump_counter = 0;
+			}
+
+			// F_task = L_task*(acc_com_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
+			// cout << "J_task " << endl << J_task << endl;
+			// cout << "L_task_inv " << endl << J_task*robot->_M_inv*J_task.transpose() << endl;
+			// cout << "L_task " << endl << L_task << endl;
+			// if (L_task(2,2) < 0.001) {
+			// 	f_global_sim_pause = true;
+			// 	cout << "Global pause " << endl;
+			// }
+			// cout << "com_v " << endl << com_v.transpose() << endl;
+			// cout << "com_pos_err " << endl << com_pos_err.transpose() << endl;
+			// cout << "F_task " << endl << F_task.transpose() << endl;
+
+			// - compute posture torques
+			null_actuated_space_projection_contact = 
+				MatrixXd::Identity(act_dof,act_dof) - actuated_space_projection_contact_both.transpose()*J_task.transpose()*L_task*J_task*robot->_M_inv*SN_contact_both.transpose();
+
+			// - compute required joint torques
+			tau_act = actuated_space_projection_contact_both.transpose()*(J_task.transpose()*F_task);
+			// tau_act += null_actuated_space_projection_contact*(actuated_space_projection_contact_both.transpose()*gj);
+			tau_act += null_actuated_space_projection_contact*(
+				actuated_space_projection_contact_both.transpose()*gj + 
+				actuated_space_inertia_contact_both*(-kpj*0.1 * (robot->_q.tail(act_dof) - q_home.tail(act_dof)) - kvj*0.3 * robot->_dq.tail(act_dof))
+			);
+			// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
+
+			// cout << "tau_act before internal forces correction: " << tau_act.transpose() << endl;
+
+			// calculate feet stabilizing forces
+			// double des_feet_tension = kpfeetdistance*(feet_distance - 0.75);
+			// cout << "des_feet_tension " << des_feet_tension << endl;
+
+			// remove moments at the feet
+			// cout << "feet_internal_force_projected_both_gravity: " << feet_internal_force_projected_both_gravity.transpose() << endl;
+			Eigen::VectorXd tau_0(act_dof);
+			Eigen::VectorXd tau_0_rhs(act_dof+6);
+
+			tau_0_rhs.head(act_dof) = actuated_space_inertia_contact_inv_both*tau_act;
+			tau_0_rhs(act_dof) = 0 + feet_internal_force_projected_both_gravity(0); // left foot moment x
+			tau_0_rhs(act_dof+1) = 0 + feet_internal_force_projected_both_gravity(1); // left foot moment y
+			tau_0_rhs(act_dof+2) = 0 + feet_internal_force_projected_both_gravity(2); // right foot moment x
+			tau_0_rhs(act_dof+3) = 0 + feet_internal_force_projected_both_gravity(3); // right foot moment y
+			// tau_0_rhs(act_dof+4) = des_feet_tension + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+			tau_0_rhs(act_dof+4) = 0 + feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+			tau_0_rhs(act_dof+5) = 0 + feet_internal_force_projected_both_gravity(5); // internal moment between feet = 0
+			tau_0 = feet_null_projector_both_inv*tau_0_rhs;
+			// cout << "actuated_space_inertia_contact_inv_both*tau_act " << ((actuated_space_inertia_contact_inv_both)*tau_act).transpose() << endl;
+			// cout << "actuated_space_inertia_contact_inv_both*tau_0 " << ((actuated_space_inertia_contact_inv_both)*tau_0).transpose() << endl;
+			tau_act = tau_0;
 		}
 
 		// assemble full tau vector for simulation
