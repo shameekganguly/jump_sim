@@ -485,6 +485,8 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 					// } else {
 						curr_state = FSMState::Balancing;
 						cout << "Switching from FallingMidAir to Balancing" << endl;
+					cout << "Estimated ZMP position: " << pos_support_centroid.transpose() << endl;
+					cout << "Actual COM position: " << com_pos.transpose() << endl;
 					// }
 				} else {
 					balance_counter++;
@@ -647,7 +649,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 					// }
 				// }
 				if (is_sticking) {
-					cout << "Exceeded normal force " << F_contact.transpose() << endl;
+					// cout << "Exceeded normal force " << F_contact.transpose() << endl;
 					// if (left_foot_force_list.size()) {
 					// 	cout << "Actual left foot contact forces " << left_foot_force_list[0].transpose() << endl;
 					// }
@@ -658,7 +660,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 					tau_act = tau_act_passive;
 				}
 				else if (is_slipping) {
-					cout << "Slip detected " << F_contact.transpose() << endl;
+					// cout << "Slip detected " << F_contact.transpose() << endl;
 					// tau_act.setZero(act_dof); //play safe
 					tau_act = tau_act_passive;
 				}
@@ -669,7 +671,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		if (curr_state == FSMState::Jumping) {
 			// start accelerating COM upwards while maintaining tension between feet
 			Eigen::Vector3d com_desired_velocity; // vx, vy, vz
-			com_desired_velocity << -0.05, 0.0, 1.5*fmin(1.0, 0.75/feet_distance);
+			com_desired_velocity << 0.0, 0.0, 2.0*fmin(1.0, 0.75/feet_distance);
 			Eigen::Vector3d torso_desired_ang_v; // wx, wy, wz
 			torso_desired_ang_v << 0.0, -4.0, 0.0;
 
@@ -692,16 +694,17 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			//TODO: separate linear and angular parts in task force below
 			L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
 			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.5).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom*2.0).array()*(com_v - com_desired_velocity).array();
-			Eigen::Vector3d acc_tor_ang_err = - kpacom*0.0*torso_ang_err.array() - kvacom*2.0*(torso_ang_v - torso_desired_ang_v).array();
+			Eigen::Vector3d acc_tor_ang_err = - kpacom*2.0*torso_ang_err.array() - kvacom*2.0*(torso_ang_v - torso_desired_ang_v).array();
 			Eigen::VectorXd acc_task_err(6);
 			acc_task_err << acc_com_err, acc_tor_ang_err;
 			F_task = L_task*(acc_task_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
 
 			// if knee pitch exceeds a certain angle, switch to fall controller
-			if (robot->_q[9] < 30.0/180.0*M_PI || robot->_q[29] < 30.0/180.0*M_PI) {
+			if (robot->_q[9] < 45.0/180.0*M_PI || robot->_q[29] < 45.0/180.0*M_PI) {
 				// TODO: check thigh pitch as well?
 				curr_state = FSMState::FallingMidAir;
 				cout << "Switching from Jumping to FallingMidAir" << endl;
+				cout << "Desired velocity was " << com_desired_velocity.transpose() << endl;
 			}
 			// alternatively, when contact is lost, switch to FSMState::FallingMidAir
 			if (left_foot_point_list.size() == 0 && right_foot_point_list.size() == 0) {
