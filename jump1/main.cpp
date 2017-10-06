@@ -395,7 +395,16 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			left_to_right_foot_unit_vec = (right_foot_frame_pos_world - left_foot_frame_pos_world);
 			feet_distance = left_to_right_foot_unit_vec.norm();
 			left_to_right_foot_unit_vec.normalize();
+			// cout << "left_to_right_foot_unit_vec " << left_to_right_foot_unit_vec.transpose() << endl;
+			// cout << "feet_distance " << feet_distance << endl;
+			if (feet_distance > 0.1) {
+				feet_internal_forces_selection_mat.block(4,0,1,3) = left_to_right_foot_unit_vec.transpose();
+				feet_internal_forces_selection_mat.block(4,6,1,3) = -left_to_right_foot_unit_vec.transpose();
+				feet_internal_forces_selection_mat.block(5,3,1,3) = left_to_right_foot_unit_vec.transpose();
+				feet_internal_forces_selection_mat.block(5,9,1,3) = -left_to_right_foot_unit_vec.transpose();
+			}
 			J_feet_tension = left_to_right_foot_unit_vec.transpose()*(Jv_right_foot - Jv_left_foot);
+			// cout << "feet_internal_forces_selection_mat " << endl << feet_internal_forces_selection_mat << endl;
 
 			// update torso angular parameters
 			robot->Jw(Jw_torso, torso_name);
