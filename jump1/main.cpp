@@ -297,13 +297,18 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	Eigen::Matrix3d rot_torso_des = Eigen::Matrix3d::Identity();
 	Eigen::MatrixXd Jw_left_foot(3, robot->dof());
 	Eigen::MatrixXd Jw_right_foot(3, robot->dof());
-	// Eigen::Matrix3d rot_left_foot;
+	Eigen::Matrix3d rot_left_foot;
+	Eigen::Matrix3d rot_right_foot;
+	Eigen::Matrix3d rot_left_foot_des = Eigen::Matrix3d::Identity();
+	Eigen::Matrix3d rot_right_foot_des = Eigen::Matrix3d::Identity();
+	robot->rotation(rot_left_foot_des, left_foot_name);
+	robot->rotation(rot_right_foot_des, right_foot_name);
 	Eigen::MatrixXd J0_left_foot(6, robot->dof());
 	Eigen::MatrixXd J0_right_foot(6, robot->dof());
 	Eigen::MatrixXd Jv_left_foot(3, robot->dof());
 	Eigen::MatrixXd Jv_right_foot(3, robot->dof());
-	const Vector3d left_foot_pos_local(0.01, 0.0, -0.05); //TODO: tune this from actual foot contact point data 
-	const Vector3d right_foot_pos_local(0.01, 0.0, -0.05);
+	const Vector3d left_foot_pos_local(0.02, 0.0, -0.05); //TODO: tune this from actual foot contact point data 
+	const Vector3d right_foot_pos_local(0.02, 0.0, -0.05);
 	Eigen::Vector3d left_foot_frame_pos_world; // position of left foot frame
 	Eigen::Vector3d right_foot_frame_pos_world; // position of right foot frame
 	Eigen::MatrixXd J_feet_tension(1, robot->dof());
@@ -366,43 +371,57 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			right_foot_force_list.clear();
 		}
 
-		// update model every once in a while
-		// TODO: this should be in a separate thread
-		if (timer.elapsedCycles() % 10 == 1) {
-			robot->updateModel();
-			robot->gravityVector(gj, Eigen::Vector3d(0.0, 0.0, -3.00));
-			actuated_space_inertia = (robot->_M_inv.block(6,6,robot->dof()-6, robot->dof()-6)).inverse();
-			actuated_space_projection = actuated_space_inertia * (robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()));
-			// cout << robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()) << endl;
-
-			// get the task Jacobians
-			// - Jv com: TODO: need to add up the Jacobians for all the links
-			// For now, we use the torso frame as a surrogate
-			// update com position
+		// update com, zmp and foot position/velocity all the time
+		if (true) {
+			// COM position, Jacobian. TODO: separate out jacobian calculation to slower model update
 			comPositionJacobian(com_pos, J0_com, robot_rbdl, robot->_q, link_names);
 			Jv_com = J0_com.block(0,0,3,dof);
-			robot->J_0(J0_left_foot, left_foot_name, left_foot_pos_local);
-			Jv_left_foot = J0_left_foot.block(0,0,3,dof);
-			// cout << "Jv_left_foot " << endl << Jv_left_foot << endl;
-			robot->J_0(J0_right_foot, right_foot_name, right_foot_pos_local);
-			Jv_right_foot = J0_right_foot.block(0,0,3,dof);
 
-			// - J feet tension
+			// foot positions, rotations
 			robot->position(left_foot_frame_pos_world, left_foot_name, left_foot_pos_local);
-			// robot->rotation(rot_left_foot, left_foot_name);
+			robot->rotation(rot_left_foot, left_foot_name);
 			// cout << "rot_left_foot " << endl << rot_left_foot << endl;
 			robot->position(right_foot_frame_pos_world, right_foot_name, right_foot_pos_local);
+			robot->rotation(rot_right_foot, right_foot_name);
+
+			// inter foot distance, direction vector
 			left_to_right_foot_unit_vec = (right_foot_frame_pos_world - left_foot_frame_pos_world);
 			feet_distance = left_to_right_foot_unit_vec.norm();
 			left_to_right_foot_unit_vec.normalize();
 			// cout << "left_to_right_foot_unit_vec " << left_to_right_foot_unit_vec.transpose() << endl;
 			// cout << "feet_distance " << feet_distance << endl;
-			if (feet_distance > 0.1) {
-				feet_internal_forces_selection_mat.block(4,0,1,3) = left_to_right_foot_unit_vec.transpose();
-				feet_internal_forces_selection_mat.block(4,6,1,3) = -left_to_right_foot_unit_vec.transpose();
-				feet_internal_forces_selection_mat.block(5,3,1,3) = left_to_right_foot_unit_vec.transpose();
-				feet_internal_forces_selection_mat.block(5,9,1,3) = -left_to_right_foot_unit_vec.transpose();
-			}
+
+			// update support polygon centroid
+			pos_support_centroid.setZero();
+			// TODO: use computed convex hull when actually in contact
+			pos_support_centroid[1] = (left_foot_frame_pos_world[1] + right_foot_frame_pos_world[1])*0.5;
+			pos_support_centroid[0] = (left_foot_frame_pos_world[0] + right_foot_frame_pos_world[0])*0.5;
+			// cout << "Estimated ZMP position: " << pos_support_centroid.transpose() << endl;
+			// cout << "Actual COM position: " << com_pos.transpose() << endl;
+		}
+
+		// update model every once in a while
+		// TODO: this should be in a separate thread
+		if (timer.elapsedCycles() % 10 == 1) {
+			robot->updateModel();
+			robot->gravityVector(gj, Eigen::Vector3d(0.0, 0.0, -3.00));
+
+			// free space inertial projections
+			actuated_space_inertia = (robot->_M_inv.block(6,6,robot->dof()-6, robot->dof()-6)).inverse();
+			actuated_space_projection = actuated_space_inertia * (robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()));
+			// cout << robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()) << endl;
+
+			// get the task Jacobians
+			// - Jv, Jw at feet
+			robot->J_0(J0_left_foot, left_foot_name, left_foot_pos_local);
+			Jv_left_foot = J0_left_foot.block(0,0,3,dof);
+			Jw_left_foot = J0_left_foot.block(3,0,3,dof);
+			// cout << "Jv_left_foot " << endl << Jv_left_foot << endl;
+			robot->J_0(J0_right_foot, right_foot_name, right_foot_pos_local);
+			Jv_right_foot = J0_right_foot.block(0,0,3,dof);
+			Jw_right_foot = J0_right_foot.block(3,0,3,dof);
+
+			// - J feet tension
 			J_feet_tension = left_to_right_foot_unit_vec.transpose()*(Jv_right_foot - Jv_left_foot);
 			// cout << "feet_internal_forces_selection_mat " << endl << feet_internal_forces_selection_mat << endl;
 
@@ -410,6 +429,14 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			robot->Jw(Jw_torso, torso_name);
 			// cout << "Jw_torso " << endl << Jw_torso << endl;
 			robot->rotation(rot_torso, torso_name);
+
+			// update feet_internal_forces_selection_mat with currect inter-foot direction vector
+			if (feet_distance > 0.1) {
+				feet_internal_forces_selection_mat.block(4,0,1,3) = left_to_right_foot_unit_vec.transpose();
+				feet_internal_forces_selection_mat.block(4,6,1,3) = -left_to_right_foot_unit_vec.transpose();
+				feet_internal_forces_selection_mat.block(5,3,1,3) = left_to_right_foot_unit_vec.transpose();
+				feet_internal_forces_selection_mat.block(5,9,1,3) = -left_to_right_foot_unit_vec.transpose();
+			}
 
 			// contact projections for both feet
 			J_c_both << J0_left_foot, J0_right_foot;
@@ -437,17 +464,6 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// cout << "bar(SNs_both)*SNs_both = Ns_both " << endl << actuated_space_projection_contact_both*SN_contact_both << endl;
 			// cout << "feet_null_projector_both " << endl << feet_null_projector_both << endl;
 			// cout << "feet_null_projector_both_inv " << endl << feet_null_projector_both_inv << endl;
-
-			// update support polygon centroid
-			size_t n_points = left_foot_point_list.size() + right_foot_point_list.size();
-			if (n_points) {
-				pos_support_centroid.setZero();
-				// TODO: use computed convex hull
-				pos_support_centroid[1] = (left_foot_frame_pos_world[1] + right_foot_frame_pos_world[1])*0.5;
-				pos_support_centroid[0] = (left_foot_frame_pos_world[0] + right_foot_frame_pos_world[0])*0.5;
-			}
-			// cout << "Estimated ZMP position: " << pos_support_centroid.transpose() << endl;
-			// cout << "Actual COM position: " << com_pos.transpose() << endl;
 		}
 
 		// pause simulation if com velocity exceeds threshold
@@ -470,10 +486,54 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		// set tau_act
 		tau_act.setZero();
 		if (curr_state == FSMState::FallingMidAir) {
-			// simply compensate for gravity and brace for landing
-			tau_act = actuated_space_inertia*(-kpj*2*(robot->_q.tail(act_dof)- q_home.tail(act_dof)) - kvj*(robot->_dq.tail(act_dof)));
-			tau_act += actuated_space_projection*gj;
-			// TODO: check for contact and switch to FSMState::Balancing
+			// calculate task errors
+			const double des_inter_foot_distance = 0.75;
+			double com_zmp_x_err = pos_support_centroid[0] - com_pos[0]; //TODO: account for rotation
+			Vector3d left_foot_ang_err;
+			Vector3d right_foot_ang_err;
+			robot->orientationError(left_foot_ang_err, rot_left_foot_des, rot_left_foot);
+			robot->orientationError(right_foot_ang_err, rot_right_foot_des, rot_right_foot);
+
+			// calculate task dynamics
+			MatrixXd J_inter_foot_distance = J_feet_tension;
+			MatrixXd J_com_zmp_x_err = Vector3d(1.0, 0, 0).transpose()*((Jv_left_foot + Jv_right_foot)*0.5 - Jv_com);
+			MatrixXd J_fall_task (8, dof);
+			MatrixXd L_fall_task (8, 8);
+			J_fall_task << J_inter_foot_distance, J_com_zmp_x_err, Jw_left_foot, Jw_right_foot;
+			// cout << "J_fall_task " << endl << J_fall_task << endl;
+			MatrixXd M_inv_sel = robot->_M_inv.block(0,6,dof, act_dof);
+			L_fall_task = (J_fall_task*M_inv_sel*actuated_space_inertia*M_inv_sel.transpose()*J_fall_task.transpose()).inverse();
+			// cout << "L_fall_task " << endl << L_fall_task << endl;
+			MatrixXd N_fall_task(act_dof, act_dof);
+			N_fall_task =
+				MatrixXd::Identity(act_dof,act_dof) - actuated_space_projection*J_fall_task.transpose()*L_fall_task*J_fall_task*M_inv_sel;
+
+			// calculate required task force
+			VectorXd task_err_acc(8);
+			VectorXd lin_task_err(2);
+			lin_task_err << (feet_distance - des_inter_foot_distance), com_zmp_x_err;
+			VectorXd ang_task_err(6);
+			ang_task_err << left_foot_ang_err, right_foot_ang_err;
+			task_err_acc << -20.0*lin_task_err, -10.0*ang_task_err;
+			// cout << "fall task_err " << lin_task_err.transpose() << " " << ang_task_err.transpose() << endl;
+			VectorXd task_vel;
+			task_vel = J_fall_task*robot->_dq;
+			VectorXd F_fall_task;
+			F_fall_task = L_fall_task*(task_err_acc + -10.0*(task_vel) + J_fall_task*robot->_M_inv*gj);
+			// cout << "fall F_fall_task " << F_fall_task.transpose() << endl;
+
+			// calculate required actuator torques
+			tau_act = actuated_space_projection*(J_fall_task.transpose()*F_fall_task);
+			tau_act += N_fall_task*(
+				actuated_space_projection*gj +
+				actuated_space_inertia*(-kpj*4*(robot->_q.tail(act_dof)- q_home.tail(act_dof)) - kvj*1*(robot->_dq.tail(act_dof)))
+			);
+
+			// // simply compensate for gravity and brace for landing
+			// tau_act = actuated_space_inertia*(-kpj*2*(robot->_q.tail(act_dof)- q_home.tail(act_dof)) - kvj*(robot->_dq.tail(act_dof)));
+			// tau_act += actuated_space_projection*gj;
+
+			// check for contact and switch to FSMState::Balancing
 			if ((left_foot_point_list.size() || right_foot_point_list.size()) && robot->_dq[2] < 0) {
 				if (balance_counter > BALANCE_COUNT_THRESH) {
 					// reset the stable balance counter
@@ -485,8 +545,8 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 					// } else {
 						curr_state = FSMState::Balancing;
 						cout << "Switching from FallingMidAir to Balancing" << endl;
-					cout << "Estimated ZMP position: " << pos_support_centroid.transpose() << endl;
-					cout << "Actual COM position: " << com_pos.transpose() << endl;
+					// cout << "Landing: Estimated ZMP position: " << pos_support_centroid.transpose() << endl;
+					// cout << "Landing: Actual COM position: " << com_pos.transpose() << endl;
 					// }
 				} else {
 					balance_counter++;
@@ -673,7 +733,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			Eigen::Vector3d com_desired_velocity; // vx, vy, vz
 			com_desired_velocity << 0.0, 0.0, 2.0*fmin(1.0, 0.75/feet_distance);
 			Eigen::Vector3d torso_desired_ang_v; // wx, wy, wz
-			torso_desired_ang_v << 0.0, -4.0, 0.0;
+			torso_desired_ang_v << 0.0, -3.5, 0.0;
 
 			// - set the task Jacobian, project through the contact null-space
 			J_task.setZero(6, dof);
@@ -705,6 +765,8 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 				curr_state = FSMState::FallingMidAir;
 				cout << "Switching from Jumping to FallingMidAir" << endl;
 				cout << "Desired velocity was " << com_desired_velocity.transpose() << endl;
+				// cout << "Jumping: Estimated ZMP position: " << pos_support_centroid.transpose() << endl;
+				// cout << "Jumping: Actual COM position: " << com_pos.transpose() << endl;
 			}
 			// alternatively, when contact is lost, switch to FSMState::FallingMidAir
 			if (left_foot_point_list.size() == 0 && right_foot_point_list.size() == 0) {
