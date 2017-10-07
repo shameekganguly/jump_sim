@@ -101,7 +101,8 @@ void keySelect(GLFWwindow* window, int key, int scancode, int action, int mods);
 MatrixXd pseudoinverse(const MatrixXd &mat, double tolerance = 1e-4);
 
 // util 
-void comPositionJacobian(Vector3d& robot_com, MatrixXd& ret_J0, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names);
+void comPosition(Vector3d& robot_com, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names);
+void comJacobian(MatrixXd& ret_J0, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names);
 
 int main (int argc, char** argv) {
 	cout << "Loading URDF world model file: " << world_fname << endl;
@@ -276,11 +277,38 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	feet_null_projector_both.setZero(act_dof+6, act_dof);
 	Eigen::VectorXd feet_internal_force_projected_both_gravity(6);
 	Eigen::MatrixXd feet_null_projector_both_inv(act_dof, act_dof+6);
+	Eigen::MatrixXd J_c_both(12, robot->dof());
+	Eigen::MatrixXd L_contact_both(12, 12);
+	Eigen::MatrixXd N_contact_both(dof, dof);
+	Eigen::MatrixXd SN_contact_both(act_dof, dof);
+	Eigen::VectorXd F_contact;
 
 	std::vector<Eigen::Vector3d> left_foot_force_list;
 	std::vector<Eigen::Vector3d> left_foot_point_list;
 	std::vector<Eigen::Vector3d> right_foot_force_list;
 	std::vector<Eigen::Vector3d> right_foot_point_list;
+
+	Eigen::MatrixXd J0_com(6, robot->dof());
+	Eigen::MatrixXd Jv_com(3, robot->dof());
+	Eigen::MatrixXd Jw_torso(3, robot->dof());
+	Eigen::Matrix3d rot_torso;
+	Eigen::MatrixXd Jw_left_foot(3, robot->dof());
+	Eigen::MatrixXd Jw_right_foot(3, robot->dof());
+	Eigen::Matrix3d rot_left_foot;
+	Eigen::Matrix3d rot_right_foot;
+	Eigen::MatrixXd J0_left_foot(6, robot->dof());
+	Eigen::MatrixXd J0_right_foot(6, robot->dof());
+	Eigen::MatrixXd Jv_left_foot(3, robot->dof());
+	Eigen::MatrixXd Jv_right_foot(3, robot->dof());
+	const Vector3d left_foot_pos_local(0.02, 0.0, -0.05);
+	const Vector3d right_foot_pos_local(0.02, 0.0, -0.05);
+	Eigen::Vector3d left_foot_frame_pos_world; // position of left foot frame
+	Eigen::Vector3d right_foot_frame_pos_world; // position of right foot frame
+	Eigen::MatrixXd J_feet_tension(1, robot->dof());
+	double feet_distance;
+	Eigen::Vector3d left_to_right_foot_unit_vec;
+	Eigen::Vector3d pos_support_centroid;
+
 	Eigen::MatrixXd J_task;
 	Eigen::MatrixXd L_task;
 	Eigen::VectorXd F_task;
@@ -290,36 +318,28 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 	Eigen::Vector3d torso_ang_err;
 	Eigen::Vector3d com_v;
 	Eigen::Vector3d torso_ang_v;
-	Eigen::MatrixXd J0_com(6, robot->dof());
-	Eigen::MatrixXd Jv_com(3, robot->dof());
-	Eigen::MatrixXd Jw_torso(3, robot->dof());
-	Eigen::Matrix3d rot_torso;
+
+	MatrixXd J_inter_foot_distance(1, dof);
+	MatrixXd J_com_zmp_x_err(1, dof);
+	MatrixXd J_fall_task (8, dof);
+	MatrixXd L_fall_task (8, 8);
+	MatrixXd M_inv_sel (dof, act_dof);
+	MatrixXd N_fall_task(act_dof, act_dof);
+	Vector3d left_foot_ang_err;
+	Vector3d right_foot_ang_err;
+	double com_zmp_x_err;
+	VectorXd fall_task_err_acc(8);
+	VectorXd fall_lin_task_err(2);
+	VectorXd fall_ang_task_err(6);
+	VectorXd fall_task_vel(8);
+	VectorXd F_fall_task(8);
+
 	Eigen::Matrix3d rot_torso_des = Eigen::Matrix3d::Identity();
-	Eigen::MatrixXd Jw_left_foot(3, robot->dof());
-	Eigen::MatrixXd Jw_right_foot(3, robot->dof());
-	Eigen::Matrix3d rot_left_foot;
-	Eigen::Matrix3d rot_right_foot;
 	Eigen::Matrix3d rot_left_foot_des = Eigen::Matrix3d::Identity();
 	Eigen::Matrix3d rot_right_foot_des = Eigen::Matrix3d::Identity();
 	robot->rotation(rot_left_foot_des, left_foot_name);
 	robot->rotation(rot_right_foot_des, right_foot_name);
-	Eigen::MatrixXd J0_left_foot(6, robot->dof());
-	Eigen::MatrixXd J0_right_foot(6, robot->dof());
-	Eigen::MatrixXd Jv_left_foot(3, robot->dof());
-	Eigen::MatrixXd Jv_right_foot(3, robot->dof());
-	const Vector3d left_foot_pos_local(0.02, 0.0, -0.05); //TODO: tune this from actual foot contact point data 
-	const Vector3d right_foot_pos_local(0.02, 0.0, -0.05);
-	Eigen::Vector3d left_foot_frame_pos_world; // position of left foot frame
-	Eigen::Vector3d right_foot_frame_pos_world; // position of right foot frame
-	Eigen::MatrixXd J_feet_tension(1, robot->dof());
-	double feet_distance;
-	Eigen::Vector3d left_to_right_foot_unit_vec;
-	Eigen::Vector3d pos_support_centroid;
-	Eigen::MatrixXd J_c_both(12, robot->dof());
-	Eigen::MatrixXd L_contact_both(12, 12);
-	Eigen::MatrixXd N_contact_both(dof, dof);
-	Eigen::MatrixXd SN_contact_both(act_dof, dof);
-	Eigen::VectorXd F_contact;
+
 	uint balance_counter = 0;
 	const uint BALANCE_COUNT_THRESH = 11;
 	uint stable_counter;
@@ -373,9 +393,8 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 
 		// update com, zmp and foot position/velocity all the time
 		if (true) {
-			// COM position, Jacobian. TODO: separate out jacobian calculation to slower model update
-			comPositionJacobian(com_pos, J0_com, robot_rbdl, robot->_q, link_names);
-			Jv_com = J0_com.block(0,0,3,dof);
+			// COM position
+			comPosition(com_pos, robot_rbdl, robot->_q, link_names);
 
 			// foot positions, rotations
 			robot->position(left_foot_frame_pos_world, left_foot_name, left_foot_pos_local);
@@ -412,6 +431,10 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// cout << robot->_M_inv.block(6,0,robot->dof()-6, robot->dof()) << endl;
 
 			// get the task Jacobians
+			// - com Jv
+			comJacobian(J0_com, robot_rbdl, robot->_q, link_names);
+			Jv_com = J0_com.block(0,0,3,dof);
+
 			// - Jv, Jw at feet
 			robot->J_0(J0_left_foot, left_foot_name, left_foot_pos_local);
 			Jv_left_foot = J0_left_foot.block(0,0,3,dof);
@@ -464,6 +487,33 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// cout << "bar(SNs_both)*SNs_both = Ns_both " << endl << actuated_space_projection_contact_both*SN_contact_both << endl;
 			// cout << "feet_null_projector_both " << endl << feet_null_projector_both << endl;
 			// cout << "feet_null_projector_both_inv " << endl << feet_null_projector_both_inv << endl;
+
+			// update fall task dynamics
+			J_inter_foot_distance = J_feet_tension;
+			J_com_zmp_x_err = Vector3d(1.0, 0, 0).transpose()*((Jv_left_foot + Jv_right_foot)*0.5 - Jv_com);
+			// TODO: ^^ fix x vector above to be in plane perpendicular to the feet vector
+			J_fall_task << J_inter_foot_distance, J_com_zmp_x_err, Jw_left_foot, Jw_right_foot;
+			// cout << "J_fall_task " << endl << J_fall_task << endl;
+			M_inv_sel = robot->_M_inv.block(0,6,dof, act_dof);
+			L_fall_task = (J_fall_task*M_inv_sel*actuated_space_inertia*M_inv_sel.transpose()*J_fall_task.transpose()).inverse();
+			// cout << "L_fall_task " << endl << L_fall_task << endl;
+			N_fall_task =
+				MatrixXd::Identity(act_dof,act_dof) - actuated_space_projection*J_fall_task.transpose()*L_fall_task*J_fall_task*M_inv_sel;
+
+			// update double stance task dynamics
+			// - set the task Jacobian, project through the contact null-space
+			J_task.setZero(6, dof);
+			// J_task.setZero(3, dof);
+			J_task << Jv_com, Jw_torso;
+			// J_task << Jv_com;
+			// cout << "Jv_com " << endl << Jv_com << endl;
+			J_task = J_task * N_contact_both;
+			L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
+			// cout << "J_task " << endl << J_task << endl;
+			// cout << "L_task_inv " << endl << J_task*robot->_M_inv*J_task.transpose() << endl;
+			// cout << "L_task " << endl << L_task << endl;
+			null_actuated_space_projection_contact =
+				MatrixXd::Identity(act_dof,act_dof) - actuated_space_projection_contact_both.transpose()*J_task.transpose()*L_task*J_task*robot->_M_inv*SN_contact_both.transpose();
 		}
 
 		// pause simulation if com velocity exceeds threshold
@@ -488,38 +538,17 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		if (curr_state == FSMState::FallingMidAir) {
 			// calculate task errors
 			const double des_inter_foot_distance = 0.75;
-			double com_zmp_x_err = pos_support_centroid[0] - com_pos[0]; //TODO: account for rotation
-			Vector3d left_foot_ang_err;
-			Vector3d right_foot_ang_err;
+			com_zmp_x_err = pos_support_centroid[0] - com_pos[0]; //TODO: account for yaw rotation
 			robot->orientationError(left_foot_ang_err, rot_left_foot_des, rot_left_foot);
 			robot->orientationError(right_foot_ang_err, rot_right_foot_des, rot_right_foot);
 
-			// calculate task dynamics
-			MatrixXd J_inter_foot_distance = J_feet_tension;
-			MatrixXd J_com_zmp_x_err = Vector3d(1.0, 0, 0).transpose()*((Jv_left_foot + Jv_right_foot)*0.5 - Jv_com);
-			MatrixXd J_fall_task (8, dof);
-			MatrixXd L_fall_task (8, 8);
-			J_fall_task << J_inter_foot_distance, J_com_zmp_x_err, Jw_left_foot, Jw_right_foot;
-			// cout << "J_fall_task " << endl << J_fall_task << endl;
-			MatrixXd M_inv_sel = robot->_M_inv.block(0,6,dof, act_dof);
-			L_fall_task = (J_fall_task*M_inv_sel*actuated_space_inertia*M_inv_sel.transpose()*J_fall_task.transpose()).inverse();
-			// cout << "L_fall_task " << endl << L_fall_task << endl;
-			MatrixXd N_fall_task(act_dof, act_dof);
-			N_fall_task =
-				MatrixXd::Identity(act_dof,act_dof) - actuated_space_projection*J_fall_task.transpose()*L_fall_task*J_fall_task*M_inv_sel;
-
 			// calculate required task force
-			VectorXd task_err_acc(8);
-			VectorXd lin_task_err(2);
-			lin_task_err << (feet_distance - des_inter_foot_distance), com_zmp_x_err;
-			VectorXd ang_task_err(6);
-			ang_task_err << left_foot_ang_err, right_foot_ang_err;
-			task_err_acc << -20.0*lin_task_err, -10.0*ang_task_err;
+			fall_lin_task_err << (feet_distance - des_inter_foot_distance), com_zmp_x_err;
+			fall_ang_task_err << left_foot_ang_err, right_foot_ang_err;
+			fall_task_err_acc << -20.0*fall_lin_task_err, -10.0*fall_ang_task_err;
 			// cout << "fall task_err " << lin_task_err.transpose() << " " << ang_task_err.transpose() << endl;
-			VectorXd task_vel;
-			task_vel = J_fall_task*robot->_dq;
-			VectorXd F_fall_task;
-			F_fall_task = L_fall_task*(task_err_acc + -10.0*(task_vel) + J_fall_task*robot->_M_inv*gj);
+			fall_task_vel = J_fall_task*robot->_dq;
+			F_fall_task = L_fall_task*(fall_task_err_acc + -10.0*(fall_task_vel) + J_fall_task*robot->_M_inv*gj);
 			// cout << "fall F_fall_task " << F_fall_task.transpose() << endl;
 
 			// calculate required actuator torques
@@ -557,16 +586,8 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		}
 
 		if (curr_state == FSMState::Balancing) {
-			// TODO: start zero tension, COM stabilization and posture control to q_home
+			// start zero tension, COM stabilization and posture control to q_home
 
-			// - set the task Jacobian, project through the contact null-space
-			J_task.setZero(6, dof);
-			// J_task.setZero(3, dof);
-			J_task << Jv_com, Jw_torso;
-			// J_task << Jv_com;
-			// cout << "Jv_com " << endl << Jv_com << endl;
-			J_task = J_task * N_contact_both;
-			
 			// - compute task forces
 			com_v = Jv_com*robot->_dq;
 			torso_ang_v = Jw_torso*robot->_dq;
@@ -575,8 +596,8 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			robot->orientationError(torso_ang_err, rot_torso_des, rot_torso);
 			// cout << "torso_ang_err " << torso_ang_err.transpose() << endl;
 			// cout << "torso_ang_v " << torso_ang_v.transpose() << endl;
-			//TODO: separate linear and angular parts in task force below
-			L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
+
+			//separate linear and angular parts in task force below
 			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.5).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom).array()*com_v.array();
 			Eigen::Vector3d acc_tor_ang_err = - kpacom*torso_ang_err.array() - kvacom*torso_ang_v.array();
 			Eigen::VectorXd acc_task_err(6);
@@ -584,9 +605,6 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			F_task = L_task*(acc_task_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
 			// F_task = L_task*(acc_com_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
 			F_task_passive = L_task*(J_task*robot->_M_inv*N_contact_both.transpose()*gj);
-			// cout << "J_task " << endl << J_task << endl;
-			// cout << "L_task_inv " << endl << J_task*robot->_M_inv*J_task.transpose() << endl;
-			// cout << "L_task " << endl << L_task << endl;
 			// if (L_task(2,2) < 0.001) {
 			// 	f_global_sim_pause = true;
 			// 	cout << "Global pause " << endl;
@@ -595,10 +613,6 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// cout << "com_pos_err " << endl << com_pos_err.transpose() << endl;
 			// cout << "F_task " << endl << F_task.transpose() << endl;
 			// cout << "F_task_passive " << endl << F_task_passive.transpose() << endl;
-
-			// - compute posture torques
-			null_actuated_space_projection_contact = 
-				MatrixXd::Identity(act_dof,act_dof) - actuated_space_projection_contact_both.transpose()*J_task.transpose()*L_task*J_task*robot->_M_inv*SN_contact_both.transpose();
 
 			// - compute required joint torques
 			tau_act = actuated_space_projection_contact_both.transpose()*(J_task.transpose()*F_task);
@@ -735,14 +749,6 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			Eigen::Vector3d torso_desired_ang_v; // wx, wy, wz
 			torso_desired_ang_v << 0.0, -3.5, 0.0;
 
-			// - set the task Jacobian, project through the contact null-space
-			J_task.setZero(6, dof);
-			// J_task.setZero(3, dof);
-			J_task << Jv_com, Jw_torso;
-			// J_task << Jv_com;
-			// cout << "Jv_com " << endl << Jv_com << endl;
-			J_task = J_task * N_contact_both;
-			
 			// - compute task forces
 			com_v = Jv_com*robot->_dq;
 			torso_ang_v = Jw_torso*robot->_dq;
@@ -751,8 +757,6 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			robot->orientationError(torso_ang_err, rot_torso_des, rot_torso);
 			// cout << "torso_ang_err " << torso_ang_err.transpose() << endl;
 			// cout << "torso_ang_v " << torso_ang_v.transpose() << endl;
-			//TODO: separate linear and angular parts in task force below
-			L_task = (J_task*robot->_M_inv*J_task.transpose()).inverse();
 			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.5).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom*2.0).array()*(com_v - com_desired_velocity).array();
 			Eigen::Vector3d acc_tor_ang_err = - kpacom*2.0*torso_ang_err.array() - kvacom*2.0*(torso_ang_v - torso_desired_ang_v).array();
 			Eigen::VectorXd acc_task_err(6);
@@ -785,9 +789,6 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			}
 
 			// F_task = L_task*(acc_com_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
-			// cout << "J_task " << endl << J_task << endl;
-			// cout << "L_task_inv " << endl << J_task*robot->_M_inv*J_task.transpose() << endl;
-			// cout << "L_task " << endl << L_task << endl;
 			// if (L_task(2,2) < 0.001) {
 			// 	f_global_sim_pause = true;
 			// 	cout << "Global pause " << endl;
@@ -795,10 +796,6 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// cout << "com_v " << endl << com_v.transpose() << endl;
 			// cout << "com_pos_err " << endl << com_pos_err.transpose() << endl;
 			// cout << "F_task " << endl << F_task.transpose() << endl;
-
-			// - compute posture torques
-			null_actuated_space_projection_contact = 
-				MatrixXd::Identity(act_dof,act_dof) - actuated_space_projection_contact_both.transpose()*J_task.transpose()*L_task*J_task*robot->_M_inv*SN_contact_both.transpose();
 
 			// - compute required joint torques
 			tau_act = actuated_space_projection_contact_both.transpose()*(J_task.transpose()*F_task);
@@ -974,11 +971,8 @@ MatrixXd pseudoinverse(const MatrixXd &mat, double tolerance) // choose appropri
 }
 
 //------------------------------------------------------------------------------
-void comPositionJacobian(Vector3d& robot_com, MatrixXd& ret_J0, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names) {
+void comPosition(Vector3d& robot_com, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names) {
 	robot_com.setZero();
-	ret_J0.setZero(6, q.size());
-	MatrixXd link_J0;
-	link_J0.setZero(6, q.size());
 	double mass;
 	double robot_mass = 0.0;
 	Vector3d center_of_mass_local;
@@ -987,11 +981,26 @@ void comPositionJacobian(Vector3d& robot_com, MatrixXd& ret_J0, Model::RBDLModel
 	for (string link_name: link_names) {
 		robot->getLinkMass(mass, center_of_mass_local, inertia, link_name);
 		robot->position(center_of_mass_world, link_name, center_of_mass_local, q);
-		robot->J_0(link_J0, link_name, center_of_mass_local, q);
 		robot_com += center_of_mass_world*mass;
-		ret_J0 += link_J0*mass;
 		robot_mass += mass;
 	}
 	robot_com = robot_com/robot_mass;
+}
+
+//------------------------------------------------------------------------------
+void comJacobian(MatrixXd& ret_J0, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names) {
+	ret_J0.setZero(6, q.size());
+	MatrixXd link_J0;
+	link_J0.setZero(6, q.size());
+	double mass;
+	double robot_mass = 0.0;
+	Vector3d center_of_mass_local;
+	Matrix3d inertia;
+	for (string link_name: link_names) {
+		robot->getLinkMass(mass, center_of_mass_local, inertia, link_name);
+		robot->J_0(link_J0, link_name, center_of_mass_local, q);
+		ret_J0 += link_J0*mass;
+		robot_mass += mass;
+	}
 	ret_J0 = ret_J0/robot_mass; //TODO: this is obviously incorrect for Jw. Need to fix by implementing the parallel axis theorem.
 }
