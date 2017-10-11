@@ -755,6 +755,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// cout << " Desired zmp pos " << pos_support_centroid.transpose() << endl;
 			com_pos_err << (com_pos[0] - pos_support_centroid[0]), (com_pos[1] - pos_support_centroid[1]), 0.0;
 			robot->orientationError(torso_ang_err, rot_torso_des, rot_torso);
+			//TODO: ^^ here, the desired rotation should be relative to the current orientation of the body
 			// cout << "torso_ang_err " << torso_ang_err.transpose() << endl;
 			// cout << "torso_ang_v " << torso_ang_v.transpose() << endl;
 			Eigen::Vector3d acc_com_err = - Eigen::Vector3d(kplcom, kplcom, kplcom*0.5).array()*com_pos_err.array() - Eigen::Vector3d(kvlcom, kvlcom, kvlcom*2.0).array()*(com_v - com_desired_velocity).array();
