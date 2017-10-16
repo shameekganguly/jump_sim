@@ -55,4 +55,5 @@ set (CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE        ${PROJECT_SOURCE_DIR}/bin)
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${PROJECT_SOURCE_DIR}/bin)
 set (BINARY_DIR ${PROJECT_SOURCE_DIR}/bin)
 
-add_subdirectory(jump1)
+# add_subdirectory(jump1)
+add_subdirectory(jump2)
