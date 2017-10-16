@@ -10,10 +10,10 @@ set (COMMON_SOURCE
 	${PROJECT_SOURCE_DIR}/src/force_sensor/ForceSensorDisplay.h)
 include_directories(${PROJECT_SOURCE_DIR}/src)
 
-# set common dependencies
-# - eigen3 # must be loaded before chai to avoid a conflict between the system Eigen and the Chai eigen.
-find_package(Eigen3 REQUIRED)
-include_directories(${EIGEN3_INCLUDE_DIR})
+# # set common dependencies
+# # - eigen3 # must be loaded before chai to avoid a conflict between the system Eigen and the Chai eigen.
+# find_package(Eigen3 REQUIRED)
+# include_directories(${EIGEN3_INCLUDE_DIR})
 
 # - CHAI3D
 find_package(CHAI3D REQUIRED)
