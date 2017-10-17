@@ -1,5 +1,6 @@
 // implementation for ToroJumpController classes
 #include "ToroJumpController.h"
+#include <iostream>
 
 using namespace Eigen;
 using namespace std;
@@ -158,6 +159,133 @@ ToroRuntimeModel::~ToroRuntimeModel() {
 	delete _model_internal;
 }
 
+// update balance kinematics
+void ToroRuntimeModel::updateBalanceKinematicModel() {
+	// COM position
+	comPosition(_com_pos);
+
+	// foot positions, rotations
+	position(_left_foot_frame_pos_world, _left_foot_name, _left_foot_pos_local);
+	rotation(_rot_left_foot, _left_foot_name);
+	// cout << "rot_left_foot " << endl << _rot_left_foot << endl;
+	position(_right_foot_frame_pos_world, _right_foot_name, _right_foot_pos_local);
+	rotation(_rot_right_foot, _right_foot_name);
+
+	// inter foot distance, direction vector
+	_left_to_right_foot_unit_vec = (_right_foot_frame_pos_world - _left_foot_frame_pos_world);
+	_feet_distance = _left_to_right_foot_unit_vec.norm();
+	_left_to_right_foot_unit_vec.normalize();
+	// cout << "left_to_right_foot_unit_vec " << _left_to_right_foot_unit_vec.transpose() << endl;
+	// cout << "feet_distance " << _feet_distance << endl;
+
+	// update support polygon centroid
+	_pos_support_centroid.setZero();
+	// TODO: use computed convex hull when actually in contact
+	_pos_support_centroid[1] = (_left_foot_frame_pos_world[1] + _right_foot_frame_pos_world[1])*0.5;
+	_pos_support_centroid[0] = (_left_foot_frame_pos_world[0] + _right_foot_frame_pos_world[0])*0.5;
+	// cout << "Estimated ZMP position: " << _pos_support_centroid.transpose() << endl;
+	// cout << "Actual COM position: " << _com_pos.transpose() << endl;
+}
+
+// overriden parent class function: updateModel
+void ToroRuntimeModel::updateModel() {
+	// parent update model
+	Model::ModelInterface::updateModel();
+
+	// update balance kinematics
+	updateBalanceKinematicModel();
+
+	// update other articulated body model parts
+	gravityVector(_gj, Vector3d(0.0, 0.0, -3.00)); //TODO: expose the gravity vector to application
+
+	// free space inertial projections
+	_actuated_space_inertia = (_M_inv.block(6,6,_act_dof, _act_dof)).inverse();
+	_actuated_space_projection = _actuated_space_inertia * (_M_inv.block(6,0,_act_dof,_dof));
+	// cout << _M_inv.block(6,0,act_dof, dof) << endl;
+
+	// get the task Jacobians
+	// - com Jv
+	comLinearJacobian(_Jv_com);
+
+	// - Jv, Jw at feet
+	J_0(_J0_left_foot, _left_foot_name, _left_foot_pos_local);
+	_Jv_left_foot = _J0_left_foot.block(0,0,3,_dof);
+	_Jw_left_foot = _J0_left_foot.block(3,0,3,_dof);
+	// cout << "Jv_left_foot " << endl << _Jv_left_foot << endl;
+	J_0(_J0_right_foot, _right_foot_name, _right_foot_pos_local);
+	_Jv_right_foot = _J0_right_foot.block(0,0,3,_dof);
+	_Jw_right_foot = _J0_right_foot.block(3,0,3,_dof);
+
+	// - J feet tension
+	_J_feet_tension = _left_to_right_foot_unit_vec.transpose()*(_Jv_right_foot - _Jv_left_foot);
+	// cout << "feet_internal_forces_selection_mat " << endl << feet_internal_forces_selection_mat << endl;
+
+	// update torso angular parameters
+	Jw(_Jw_torso, _torso_name);
+	// cout << "Jw_torso " << endl << _Jw_torso << endl;
+	rotation(_rot_torso, _torso_name);
+
+	// update feet_internal_forces_selection_mat with currect inter-foot direction vector
+	if (_feet_distance > 0.1) {
+		_feet_internal_forces_selection_mat.block(4,0,1,3) = _left_to_right_foot_unit_vec.transpose();
+		_feet_internal_forces_selection_mat.block(4,6,1,3) = -_left_to_right_foot_unit_vec.transpose();
+		_feet_internal_forces_selection_mat.block(5,3,1,3) = _left_to_right_foot_unit_vec.transpose();
+		_feet_internal_forces_selection_mat.block(5,9,1,3) = -_left_to_right_foot_unit_vec.transpose();
+	}
+
+	// contact projections for both feet
+	_J_c_both << _J0_left_foot, _J0_right_foot;
+	_L_contact_both = (_J_c_both*_M_inv*_J_c_both.transpose()).inverse();
+	_N_contact_both = 
+		MatrixXd::Identity(_dof, _dof) - _M_inv*_J_c_both.transpose()*_L_contact_both*_J_c_both;
+	_SN_contact_both = _N_contact_both.block(6, 0, _act_dof, _dof);
+	_actuated_space_inertia_contact_inv_both = _SN_contact_both*_M_inv*_SN_contact_both.transpose();
+	_actuated_space_inertia_contact_both = pseudoinverse(_actuated_space_inertia_contact_inv_both); // pseudo inverse of the inverse which is guaranteed to be singular
+	_actuated_space_projection_contact_both = _M_inv*_SN_contact_both.transpose()*_actuated_space_inertia_contact_both;
+	_feet_null_projector_both.block(0,0,_act_dof,_act_dof) = _actuated_space_inertia_contact_inv_both;
+	_feet_null_projector_both.block(_act_dof,0,6,_act_dof) = 
+		_feet_internal_forces_selection_mat*_L_contact_both*_J_c_both*(_M_inv.block(0,6,_dof,_act_dof));
+	_feet_null_projector_both_inv = pseudoinverse(_feet_null_projector_both);
+	_feet_internal_force_projected_both_gravity = _feet_internal_forces_selection_mat*(_L_contact_both*_J_c_both*_M_inv)*_gj;
+	// cout << "J_c_both " << endl << _J_c_both << endl;
+	// cout << "L_contact_both " << endl << _L_contact_both << endl;
+	// cout << "robot->_M_inv " << endl << _M_inv << endl;
+	// cout << "N_contact_both " << endl << _N_contact_both << endl;
+	// cout << "J_c_both*N_contact_both " << endl << _J_c_both*_N_contact_both << endl;
+	// cout << "SN_contact_both " << endl << _SN_contact_both << endl;
+	// cout << "actuated_space_inertia_contact_inv_both " << endl << _actuated_space_inertia_contact_inv_both << endl;
+	// cout << "actuated_space_inertia_contact_both " << endl << _actuated_space_inertia_contact_both << endl;
+	// cout << "actuated_space_projection_contact_both " << endl << _actuated_space_projection_contact_both << endl;
+	// cout << "bar(SNs_both)*SNs_both = Ns_both " << endl << _actuated_space_projection_contact_both*_SN_contact_both << endl;
+	// cout << "feet_null_projector_both " << endl << _feet_null_projector_both << endl;
+	// cout << "feet_null_projector_both_inv " << endl << _feet_null_projector_both_inv << endl;
+
+	// update fall task dynamics
+	_J_inter_foot_distance = _J_feet_tension;
+	_J_com_zmp_x_err = Vector3d(1.0, 0, 0).transpose()*((_Jv_left_foot + _Jv_right_foot)*0.5 - _Jv_com);
+	// TODO: ^^ fix x vector above to be in plane perpendicular to the feet vector
+	_J_fall_task << _J_inter_foot_distance, _J_com_zmp_x_err, _Jw_left_foot, _Jw_right_foot;
+	// cout << "J_fall_task " << endl << _J_fall_task << endl;
+	_M_inv_sel = _M_inv.block(0,6,_dof,_act_dof);
+	_L_fall_task = (_J_fall_task*_M_inv_sel*_actuated_space_inertia*_M_inv_sel.transpose()*_J_fall_task.transpose()).inverse();
+	// cout << "L_fall_task " << endl << _L_fall_task << endl;
+	_N_fall_task =
+		MatrixXd::Identity(_act_dof,_act_dof) - _actuated_space_projection*_J_fall_task.transpose()*_L_fall_task*_J_fall_task*_M_inv_sel;
+
+	// update double stance task dynamics
+	// - set the task Jacobian, project through the contact null-space
+	_J_task.setZero(6, _dof);
+	_J_task << _Jv_com, _Jw_torso;
+	// cout << "Jv_com " << endl << _Jv_com << endl;
+	_J_task = _J_task * _N_contact_both;
+	_L_task = (_J_task*_M_inv*_J_task.transpose()).inverse();
+	// cout << "J_task " << endl << _J_task << endl;
+	// cout << "L_task_inv " << endl << _J_task*_M_inv*_J_task.transpose() << endl;
+	// cout << "L_task " << endl << _L_task << endl;
+	_null_actuated_space_projection_contact =
+		MatrixXd::Identity(_act_dof,_act_dof) - _actuated_space_projection_contact_both.transpose()*_J_task.transpose()*_L_task*_J_task*_M_inv*_SN_contact_both.transpose();
+}
+
 // compute com position
 void ToroRuntimeModel::comPosition(Eigen::Vector3d& ret_robot_com) const{
 	ret_robot_com.setZero();
@@ -225,11 +353,25 @@ void ToroJumpController::controllerStateIs (ControllerState* state) {
 	auto ret_state = dynamic_cast<ToroJumpControllerState*>(state);
 
 	// TODO: set q, dq, contact point list to model. this also updates critical parts of the model immediately
+	_robot->_q = ret_state->_q;
+	_robot->_dq = ret_state->_dq;
 
-	// TODO: periodially update full model
+	// periodially update full model
+	if (true) { // always update the balance kinematics model
+		_robot->updateBalanceKinematicModel();
+
+		// some times there is a bug where the point list does not get updated correctly. So we have
+		// to add a hack to ensure that the list is empty when we are sure that the robot is not on the 
+		// ground
+		if (_robot->_right_foot_frame_pos_world[2] > 0.1 && _robot->_left_foot_frame_pos_world[2] > 0.1) {
+			ret_state->_left_foot_point_list.clear();
+			ret_state->_left_foot_force_list.clear();
+			ret_state->_right_foot_point_list.clear();
+			ret_state->_right_foot_force_list.clear();
+		}
+	}
 	if (ret_state->_controller_counter % 10 == 1) {
-		// ToroRuntimeModel->updateModel(); 
-		// TODO: need to first make the updateModel function in the base class virtual
+		_robot->updateModel();
 	}
 
 	// TODO: compute control torques based on new state

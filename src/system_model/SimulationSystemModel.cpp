@@ -96,7 +96,7 @@ void SimulationSystemModel::runSimulation() {
 	// create a timer
 	LoopTimer timer;
 	timer.initializeTimer();
-	timer.setLoopFrequency(state->_sim_rate); //1.5kHz timer
+	timer.setLoopFrequency(state->_sim_rate);
 	double last_time = timer.elapsedTime(); //secs
 
 	bool fTimerDidSleep = true;
@@ -127,10 +127,11 @@ void SimulationSystemModel::runControl() {
 	// create a timer
 	LoopTimer timer;
 	timer.initializeTimer();
-	timer.setLoopFrequency(state->_control_rate); //1000Hz timer
+	timer.setLoopFrequency(state->_control_rate);
 	double last_time = timer.elapsedTime(); //secs
 
 	bool fTimerDidSleep = true;
+
 	while (state->_is_running) { //automatically set to false when simulation is quit
 		fTimerDidSleep = timer.waitForNextLoop();
 
@@ -138,13 +139,14 @@ void SimulationSystemModel::runControl() {
 		double curr_time = timer.elapsedTime();
 		double loop_dt = curr_time - last_time;
 
-		// read joint positions, velocities, update model
-		_sim->getJointPositions(_robot_name, _controller->_state->_q);
-		_sim->getJointVelocities(_robot_name, _controller->_state->_dq);
+		// copy model from sim to controller
+		// this can be overloaded from the derived sim system class
+		simToModelTransfer();
 
 		// if not paused, update control torques
 		if (!state->_is_paused) {
-			// TODO: get control torques
+			_controller->controllerStateIs(_curr_state->_ctrl_state);
+			_sim->setJointTorques(_robot_name, _controller->controlTorques());
 		}
 
 		// update system current state with controller state
@@ -155,4 +157,12 @@ void SimulationSystemModel::runControl() {
 		// update last time
 		last_time = curr_time;
 	}
+}
+
+// internal model copy function from simulation to the system internal state
+void SimulationSystemModel::simToModelTransfer() {
+	// read joint positions, velocities, update controller state
+	_curr_state->_ctrl_state->copy(_controller->_state);
+	_sim->getJointPositions(_robot_name, _curr_state->_ctrl_state->_q);
+	_sim->getJointVelocities(_robot_name, _curr_state->_ctrl_state->_dq);
 }

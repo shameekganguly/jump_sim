@@ -66,6 +66,10 @@ private:
 	// internal simulation thread
 	virtual void runSimulation();
 
+protected:
+	// internal model copy function from simulation to the controller
+	virtual void simToModelTransfer();
+
 public:
 	// simulation interface
 	Simulation::Sai2Simulation* _sim;

@@ -37,6 +37,31 @@ public:
 		// reinitialize
 		reinitialize(); // TODO: check for improper reinitialization and throw execption
 	}
+
+	// overloaded simToModelTransfer
+	virtual void simToModelTransfer() {
+		// parent class copies over joint positions, velocities
+		SimulationSystemModel::simToModelTransfer();
+
+		// cast controller
+		auto controller = dynamic_cast<ToroJumpController*> (_controller);
+		// cast control state
+		auto sys_ctrl_state = dynamic_cast<ToroJumpControllerState*> (_curr_state->_ctrl_state);
+
+		// copy over the contact points and forces
+		_sim->getContactList(
+			sys_ctrl_state->_left_foot_point_list,
+			sys_ctrl_state->_left_foot_force_list,
+			_robot_name,
+			controller->controllerModel()->_left_foot_name
+		);
+		_sim->getContactList(
+			sys_ctrl_state->_right_foot_point_list,
+			sys_ctrl_state->_right_foot_force_list,
+			_robot_name,
+			controller->controllerModel()->_right_foot_name
+		);
+	}
 };
 
 #endif // TORO_JUMP_SYSTEM_MODEL_H

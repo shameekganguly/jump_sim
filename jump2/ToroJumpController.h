@@ -69,6 +69,13 @@ public:
 	// dtor
 	~ToroRuntimeModel();
 
+	// update balance kinematics
+	// This is a special update function to quickly update just the balance task kinematics
+	void updateBalanceKinematicModel();
+
+	// overriden parent class function: updateModel
+	virtual void updateModel();
+
 public:
 	// initialize dynamically sized variables
 	uint _dof;
@@ -176,6 +183,11 @@ public:
 
 	// overloaded parent function
 	void controllerStateIs (ControllerState* state);
+
+	// read only access to model
+	const ToroRuntimeModel * controllerModel() const {
+		return _robot;
+	}
 
 private:
 	// internal model interface
