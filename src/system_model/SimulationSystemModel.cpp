@@ -1,6 +1,7 @@
 // implementation for the SimulationSystemModel class
 
 #include "SimulationSystemModel.h"
+#include "timer/LoopTimer.h"
 
 using namespace std;
 using namespace Eigen;
@@ -43,13 +44,24 @@ void SimulationSystemModel::pauseIs(bool should_pause) {
 
 // start/stop simulation
 void SimulationSystemModel::runningIs(bool should_run) {
+	auto state = dynamic_cast<SimulationSystemState*>(_curr_state);
 	// start system if currently stopped
-	if (should_run && !(dynamic_cast<SimulationSystemState*>(_curr_state))->_is_running) {
-		//TODO: start simulation, control
+	if (should_run && !(state->_is_running)) {
+		// start simulation
+		state->_is_running = true;
+		_sim_thread = thread(&SimulationSystemModel::runSimulation, this);
+
+		// start control
+		_control_thread = thread(&SimulationSystemModel::runControl, this);
 	}
 	// stop system if currently started
-	if (!should_run && (dynamic_cast<SimulationSystemState*>(_curr_state))->_is_running) {
-		//TODO: stop simulation, control
+	if (!should_run && state->_is_running) {
+		// stop simulation
+		state->_is_running = false;
+		_sim_thread.join();
+
+		// stop control
+		_control_thread.join();
 	}
 }
 
@@ -74,4 +86,73 @@ bool SimulationSystemModel::reinitialize() {
 
 	// TODO: do some consistency checks
 	return true;
+}
+
+// internal thread functions: simulation
+void SimulationSystemModel::runSimulation() {
+	// get pointer to current state
+	auto state = dynamic_cast<SimulationSystemState*>(_curr_state);
+
+	// create a timer
+	LoopTimer timer;
+	timer.initializeTimer();
+	timer.setLoopFrequency(state->_sim_rate); //1.5kHz timer
+	double last_time = timer.elapsedTime(); //secs
+
+	bool fTimerDidSleep = true;
+	while (state->_is_running) {
+		fTimerDidSleep = timer.waitForNextLoop();
+
+		// integrate forward
+		double curr_time = timer.elapsedTime();
+		double loop_dt = curr_time - last_time;
+		if (!state->_is_paused) {
+			_sim->integrate(loop_dt);
+		}
+
+		// if (!fTimerDidSleep) {
+		// 	cout << "Warning: timer underflow! dt: " << loop_dt << "\n";
+		// }
+
+		// update last time
+		last_time = curr_time;
+	}
+}
+
+// internal thread functions: control
+void SimulationSystemModel::runControl() {
+	// get pointer to current state
+	auto state = dynamic_cast<SimulationSystemState*>(_curr_state);
+
+	// create a timer
+	LoopTimer timer;
+	timer.initializeTimer();
+	timer.setLoopFrequency(state->_control_rate); //1000Hz timer
+	double last_time = timer.elapsedTime(); //secs
+
+	bool fTimerDidSleep = true;
+	while (state->_is_running) { //automatically set to false when simulation is quit
+		fTimerDidSleep = timer.waitForNextLoop();
+
+		// update time
+		double curr_time = timer.elapsedTime();
+		double loop_dt = curr_time - last_time;
+
+		// read joint positions, velocities, update model
+		_sim->getJointPositions(_robot_name, _controller->_state->_q);
+		_sim->getJointVelocities(_robot_name, _controller->_state->_dq);
+
+		// if not paused, update control torques
+		if (!state->_is_paused) {
+			// TODO: get control torques
+		}
+
+		// update system current state with controller state
+		_curr_state->_ctrl_state->copy(_controller->_state);
+
+		// TODO: verify that full TORO controller state is being copied
+
+		// update last time
+		last_time = curr_time;
+	}
 }

@@ -61,10 +61,10 @@ public:
 
 private:
 	// internal controller thread
-	void runControl();
+	virtual void runControl();
 
 	// internal simulation thread
-	void runSimulation();
+	virtual void runSimulation();
 
 public:
 	// simulation interface
