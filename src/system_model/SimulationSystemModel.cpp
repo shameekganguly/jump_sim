@@ -139,6 +139,9 @@ void SimulationSystemModel::runControl() {
 		double curr_time = timer.elapsedTime();
 		double loop_dt = curr_time - last_time;
 
+		// copy over controller state to system state
+		_curr_state->_ctrl_state->copy(_controller->_state);
+
 		// copy model from sim to controller
 		// this can be overloaded from the derived sim system class
 		simToModelTransfer();
@@ -162,7 +165,6 @@ void SimulationSystemModel::runControl() {
 // internal model copy function from simulation to the system internal state
 void SimulationSystemModel::simToModelTransfer() {
 	// read joint positions, velocities, update controller state
-	_curr_state->_ctrl_state->copy(_controller->_state);
 	_sim->getJointPositions(_robot_name, _curr_state->_ctrl_state->_q);
 	_sim->getJointVelocities(_robot_name, _curr_state->_ctrl_state->_dq);
 }

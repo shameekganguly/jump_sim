@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
 	// cout << "Reached here" << endl;
 
 	// initialize the robot simulated system
-	ToroJumpSystemModel* toro = new ToroJumpSystemModel(world_fname, robot_fname, robot_name, robot->_q, robot->_dq);
+	ToroJumpSystemModel* toro = new ToroJumpSystemModel(world_fname, robot_fname, robot_name, q_home.tail(robot->dof() - 6));
 	toro->robotInitialStateIs(robot->_q, robot->_dq); // set system state
 	toro->runningIs(true); // start running
 
@@ -109,6 +109,7 @@ int main(int argc, char** argv) {
 		// update kinematic models
 		robot->_q = toro->controllerState()._q;
 		robot->updateModel();
+		//^^TODO: fix graphics glitching here probably due to non-atomic copy
 
 		// set pause state on system
 		toro->pauseIs(f_global_sim_pause);

@@ -16,6 +16,7 @@ enum ToroControllerFSMState {
 
 // struct to encapsulate state for the ToroJumpController
 struct ToroJumpControllerState: public ControllerState {
+	//TODO: ensure some way to sync variables here and the overriden copy function
 public:
 	// fsm state
 	ToroControllerFSMState _fsm_state = ToroControllerFSMState::FallingMidAir;
@@ -31,8 +32,8 @@ public:
 	Eigen::Matrix3d _rot_left_foot_des = Eigen::Matrix3d::Identity();
 	Eigen::Matrix3d _rot_right_foot_des = Eigen::Matrix3d::Identity();
 	// NOTE: ^^ the desired rotations for the feet are updated by the fall controller in runtime
-
-	// TODO: add q_home
+	double _des_com_height_balanced = 0.86;
+	Eigen::VectorXd _joint_posture_des; // only for actuated joints
 
 	// gains
 	double _kplcom = 15.0; // COM linear kp
@@ -158,6 +159,8 @@ public:
 	Eigen::VectorXd _fall_task_vel;
 	Eigen::VectorXd _F_fall_task;
 
+	// TODO: separate task kinematics/dynamics variables from control variables
+
 	// link names. set at initialization
 	std::vector<std::string> _link_names;
 
@@ -197,6 +200,8 @@ private:
 	Eigen::VectorXd _tau_act;
 	Eigen::VectorXd _temp_tau;
 	Eigen::VectorXd _tau_act_passive;
+	Eigen::VectorXd _tau_0;
+	Eigen::VectorXd _tau_0_rhs;
 };
 
 #endif // TORO_JUMP_CONTROLLER_H

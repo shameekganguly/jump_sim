@@ -22,6 +22,8 @@ void ToroJumpControllerState::copy(ControllerState* other) {
 	_rot_torso_des = other_toroctrlstate->_rot_torso_des;
 	_rot_left_foot_des = other_toroctrlstate->_rot_left_foot_des;
 	_rot_right_foot_des = other_toroctrlstate->_rot_right_foot_des;
+	_des_com_height_balanced = other_toroctrlstate->_des_com_height_balanced;
+	_joint_posture_des = other_toroctrlstate->_joint_posture_des;
 	_kplcom = other_toroctrlstate->_kplcom;
 	_kvlcom = other_toroctrlstate->_kvlcom;
 	_kpacom = other_toroctrlstate->_kpacom;
@@ -370,17 +372,343 @@ void ToroJumpController::controllerStateIs (ControllerState* state) {
 			ret_state->_right_foot_force_list.clear();
 		}
 	}
-	if (ret_state->_controller_counter % 10 == 1) {
+	if (ret_state->_controller_counter % 10 == 0) {
 		_robot->updateModel();
 	}
 
-	// TODO: compute control torques based on new state
+	// compute control torques based on new state
 	_torques.setZero(_robot->_dof);
+	if (ret_state->_fsm_state == ToroControllerFSMState::FallingMidAir) {
+		// calculate task errors
+		static const double des_inter_foot_distance = 0.75; //TODO: move to controller state
+		_robot->_com_zmp_x_err = _robot->_pos_support_centroid[0] - _robot->_com_pos[0]; //TODO: account for yaw rotation
+		_robot->orientationError(_robot->_left_foot_ang_err, ret_state->_rot_left_foot_des, _robot->_rot_left_foot);
+		_robot->orientationError(_robot->_right_foot_ang_err, ret_state->_rot_right_foot_des, _robot->_rot_right_foot);
+
+		// calculate required task force
+		_robot->_fall_lin_task_err << (_robot->_feet_distance - des_inter_foot_distance), _robot->_com_zmp_x_err;
+		_robot->_fall_ang_task_err << _robot->_left_foot_ang_err, _robot->_right_foot_ang_err;
+		_robot->_fall_task_err_acc << -20.0*_robot->_fall_lin_task_err, -10.0*_robot->_fall_ang_task_err; //TODO: move gains to state
+		// cout << "fall task_err " << _robot->_lin_task_err.transpose() << " " << _robot->_ang_task_err.transpose() << endl;
+		_robot->_fall_task_vel = _robot->_J_fall_task*_robot->_dq;
+		_robot->_F_fall_task = _robot->_L_fall_task * (
+			_robot->_fall_task_err_acc + 
+			-10.0*(_robot->_fall_task_vel) + 
+			_robot->_J_fall_task*_robot->_M_inv*_robot->_gj
+		);
+		// cout << "fall F_fall_task " << _robot->_F_fall_task.transpose() << endl;
+
+		// calculate required actuator torques
+		_tau_act = _robot->_actuated_space_projection*(_robot->_J_fall_task.transpose()*_robot->_F_fall_task);
+		_tau_act += _robot->_N_fall_task*(
+			_robot->_actuated_space_projection*_robot->_gj +
+			_robot->_actuated_space_inertia*(
+				-ret_state->_kpj*4*(_robot->_q.tail(_robot->_act_dof)-ret_state->_joint_posture_des) +
+				-ret_state->_kvj*1*(_robot->_dq.tail(_robot->_act_dof))
+			)
+		);
+
+		// // old fall posture controller: simply compensate for gravity and brace for landing
+		// tau_act = actuated_space_inertia*(-kpj*2*(robot->_q.tail(act_dof)- ret_state->_joint_posture_des) - kvj*(robot->_dq.tail(act_dof)));
+		// tau_act += actuated_space_projection*gj;
+
+		// check for contact and switch to FSMState::Balancing
+		if ((ret_state->_left_foot_point_list.size() || ret_state->_right_foot_point_list.size()) && _robot->_dq[2] < 0) {
+			// cout << "balance count " << ret_state->_balance_counter << endl;
+			if (ret_state->_balance_counter > ret_state->BALANCE_COUNT_THRESH) {
+				// reset the stable balance counter
+				ret_state->_stable_counter = 0;
+				// if (fabs(_robot->_q[2]) > 7.0/180.0*M_PI) {
+				// 	//^^ poor posture, switch to single support stance
+				// 	curr_state = FSMState::BalancingSingleStance;
+				// 	cout << "Switching from FallingMidAir to BalancingSingleStance" << endl;
+				// } else {
+					ret_state->_fsm_state = ToroControllerFSMState::Balancing;
+					cout << "Switching from FallingMidAir to Balancing" << endl;
+				// cout << "Landing: Estimated ZMP position: " << _robot->_pos_support_centroid.transpose() << endl;
+				// cout << "Landing: Actual COM position: " << _robot->_com_pos.transpose() << endl;
+				// }
+			} else {
+				ret_state->_balance_counter++;
+			}
+		} else {
+			// cout << "is robot z dq sign -ve: " << (_robot->_dq[2] < 0) << endl;
+			// cout << "is any robot foot in contact: " << (ret_state->_left_foot_point_list.size() || ret_state->_right_foot_point_list.size()) << endl;
+			ret_state->_balance_counter = 0;
+		}
+	}
+
+	if (ret_state->_fsm_state == ToroControllerFSMState::Balancing) {
+		// start zero tension, COM stabilization and posture control to q_home
+
+		// - compute task forces
+		_robot->_com_v = _robot->_Jv_com*_robot->_dq;
+		_robot->_torso_ang_v = _robot->_Jw_torso*_robot->_dq;
+		// cout << " Desired zmp pos " << _pos_support_centroid.transpose() << endl;
+		_robot->_com_pos_err << 
+			(_robot->_com_pos[0] - _robot->_pos_support_centroid[0]),
+			(_robot->_com_pos[1] - _robot->_pos_support_centroid[1]),
+			(_robot->_com_pos[2] - ret_state->_des_com_height_balanced);
+		_robot->orientationError(_robot->_torso_ang_err, ret_state->_rot_torso_des, _robot->_rot_torso);
+		// cout << "torso_ang_err " << torso_ang_err.transpose() << endl;
+		// cout << "torso_ang_v " << torso_ang_v.transpose() << endl;
+
+		//separate linear and angular parts in task force below
+		Eigen::Vector3d acc_com_err = 
+			-Eigen::Vector3d(ret_state->_kplcom, ret_state->_kplcom, ret_state->_kplcom*0.5).array()*_robot->_com_pos_err.array() +
+			-Eigen::Vector3d(ret_state->_kvlcom, ret_state->_kvlcom, ret_state->_kvlcom).array()*_robot->_com_v.array();
+		Eigen::Vector3d acc_tor_ang_err = 
+			-ret_state->_kpacom*_robot->_torso_ang_err.array() +
+			-ret_state->_kvacom*_robot->_torso_ang_v.array();
+		Eigen::VectorXd acc_task_err(6);
+		acc_task_err << acc_com_err, acc_tor_ang_err;
+		_robot->_F_task = _robot->_L_task*(
+			acc_task_err +
+			_robot->_J_task*_robot->_M_inv*_robot->_N_contact_both.transpose()*_robot->_gj
+		);
+		// F_task = L_task*(acc_com_err + J_task*robot->_M_inv*N_contact_both.transpose()*gj);
+		_robot->_F_task_passive = _robot->_L_task*(
+			_robot->_J_task*_robot->_M_inv*_robot->_N_contact_both.transpose()*_robot->_gj
+		);
+		// if (L_task(2,2) < 0.001) {
+		// 	f_global_sim_pause = true;
+		// 	cout << "Global pause " << endl;
+		// }
+		// cout << "com_v " << endl << _robot->_com_v.transpose() << endl;
+		// cout << "com_pos_err " << endl << _robot->_com_pos_err.transpose() << endl;
+		// cout << "F_task " << endl << _robot->_F_task.transpose() << endl;
+		// cout << "F_task_passive " << endl << _robot->_F_task_passive.transpose() << endl;
+
+		// - compute required joint torques
+		_tau_act = _robot->_actuated_space_projection_contact_both.transpose()*(_robot->_J_task.transpose()*_robot->_F_task);
+		// _tau_act += _robot->_null_actuated_space_projection_contact*(_robot->_actuated_space_projection_contact_both.transpose()*_robot->_gj);
+		_tau_act += _robot->_null_actuated_space_projection_contact*(
+			_robot->_actuated_space_projection_contact_both.transpose()*_robot->_gj + 
+			_robot->_actuated_space_inertia_contact_both*(
+				-ret_state->_kpj*0.1 * (_robot->_q.tail(_robot->_act_dof) - ret_state->_joint_posture_des) +
+				-ret_state->_kvj*0.3 * _robot->_dq.tail(_robot->_act_dof))
+		);
+		// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
+
+		// cout << "tau_act before internal forces correction: " << tau_act.transpose() << endl;
+
+		// calculate feet stabilizing forces
+		double des_feet_tension = ret_state->_kpfeetdistance*(_robot->_feet_distance - 0.75); //TODO: move 0.75 to desired feet distance
+		// cout << "des_feet_tension " << des_feet_tension << endl;
+
+		// remove moments at the feet
+		// cout << "feet_internal_force_projected_both_gravity: " << feet_internal_force_projected_both_gravity.transpose() << endl;
+		_tau_0_rhs.setZero(_robot->_act_dof + 6);
+
+		_tau_0_rhs.head(_robot->_act_dof) = _robot->_actuated_space_inertia_contact_inv_both*_tau_act;
+		_tau_0_rhs(_robot->_act_dof) = 0 + _robot->_feet_internal_force_projected_both_gravity(0); // left foot moment x
+		_tau_0_rhs(_robot->_act_dof+1) = 0 + _robot->_feet_internal_force_projected_both_gravity(1); // left foot moment y
+		_tau_0_rhs(_robot->_act_dof+2) = 0 + _robot->_feet_internal_force_projected_both_gravity(2); // right foot moment x
+		_tau_0_rhs(_robot->_act_dof+3) = 0 + _robot->_feet_internal_force_projected_both_gravity(3); // right foot moment y
+		_tau_0_rhs(_robot->_act_dof+4) = des_feet_tension + _robot->_feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+		_tau_0_rhs(_robot->_act_dof+5) = 0 + _robot->_feet_internal_force_projected_both_gravity(5); // internal moment between feet = 0
+		_tau_0 = _robot->_feet_null_projector_both_inv*_tau_0_rhs;
+		// cout << "actuated_space_inertia_contact_inv_both*tau_act " << ((actuated_space_inertia_contact_inv_both)*tau_act).transpose() << endl;
+		// cout << "actuated_space_inertia_contact_inv_both*tau_0 " << ((actuated_space_inertia_contact_inv_both)*tau_0).transpose() << endl;
+		_tau_act = _tau_0;
+
+		// - compute passive joint torques in case slippage/stickage is detected
+		_tau_act_passive = _robot->_actuated_space_projection_contact_both.transpose()*(_robot->_J_task.transpose()*_robot->_F_task_passive);
+		// _tau_act += _robot->_null_actuated_space_projection_contact*(_robot->_actuated_space_projection_contact_both.transpose()*_robot->_gj);
+		_tau_act_passive += _robot->_null_actuated_space_projection_contact*(
+			_robot->_actuated_space_projection_contact_both.transpose()*_robot->_gj + 
+			_robot->_actuated_space_inertia_contact_both*(
+				-ret_state->_kpj*0.1 * (_robot->_q.tail(_robot->_act_dof) - ret_state->_joint_posture_des) +
+				-ret_state->_kvj*0.3 * _robot->_dq.tail(_robot->_act_dof))
+		);
+		// tau_act = _robot->_actuated_space_projection_contact_both.transpose()*( -_robot->_M*ret-state->_kvj*(_robot->_dq));
+
+		// remove moments at the feet
+		_tau_0_rhs.head(_robot->_act_dof) = _robot->_actuated_space_inertia_contact_inv_both*_tau_act_passive;
+		_tau_0_rhs(_robot->_act_dof) = 0 + _robot->_feet_internal_force_projected_both_gravity(0); // left foot moment x
+		_tau_0_rhs(_robot->_act_dof+1) = 0 + _robot->_feet_internal_force_projected_both_gravity(1); // left foot moment y
+		_tau_0_rhs(_robot->_act_dof+2) = 0 + _robot->_feet_internal_force_projected_both_gravity(2); // right foot moment x
+		_tau_0_rhs(_robot->_act_dof+3) = 0 + _robot->_feet_internal_force_projected_both_gravity(3); // right foot moment y
+		_tau_0_rhs(_robot->_act_dof+4) = 0 + _robot->_feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+		_tau_0_rhs(_robot->_act_dof+5) = 0 + _robot->_feet_internal_force_projected_both_gravity(5); // internal moment between feet = 0
+		_tau_0 = _robot->_feet_null_projector_both_inv*_tau_0_rhs;
+		// cout << "(SNs)^T*tau_act_passive " << ((SN_contact_both).transpose()*tau_act_passive).transpose() << endl;
+		// cout << "(SNs)^T*tau_0_passive " << ((SN_contact_both).transpose()*tau_0).transpose() << endl;
+		_tau_act_passive = _tau_0;
+
+		// if COM velocity has been zero for a while, switch to FSMState::Jumping
+		// if (left_foot_point_list.size() && right_foot_point_list.size() && com_v.array().abs().maxCoeff() < 5e-3) {
+		if ((ret_state->_left_foot_point_list.size() || ret_state->_right_foot_point_list.size()) && _robot->_com_v.array().abs().maxCoeff() < 5e-3) {
+			if (ret_state->_stable_counter > ret_state->STABLE_COUNT_THRESH) {
+				ret_state->_fsm_state = ToroControllerFSMState::Jumping;
+				cout << "Switching from BalancingDoubleStance to Jumping" << endl;
+				// reset jump counter
+				ret_state->_jump_counter = 0;
+			}
+			else {
+				ret_state->_stable_counter++;
+			}
+		} else {
+			ret_state->_stable_counter = 0;
+		}
+
+		// check friction cone constraint only if in two point support. Ok to slip a bit in single point support
+		// if (left_foot_point_list.size() || right_foot_point_list.size()) {
+		// ^^ this check does not work because it is possible that the robot is in contact at the next time step
+		// and so it might slip
+			_temp_tau.setZero(_robot->_dof);
+			_temp_tau.tail(_robot->_act_dof) = _tau_act;
+			bool is_sticking = false;
+			bool is_slipping = false;
+			// if (left_foot_point_list.size() && right_foot_point_list.size()) {
+				_robot->_F_contact = -_robot->_L_contact_both*_robot->_J_c_both*_robot->_M_inv*(_temp_tau - _robot->_gj);
+				double F_contact_plane_left = Vector2d(_robot->_F_contact[0], _robot->_F_contact[1]).norm();
+				double F_contact_plane_right = Vector2d(_robot->_F_contact[6], _robot->_F_contact[7]).norm();
+				// cout << "Expected F contact: " << F_contact.transpose() << endl;
+				if (_robot->_F_contact[2] < 0 || _robot->_F_contact[8] < 0) {
+					is_sticking = true;
+				}
+				else if (
+					fabs(F_contact_plane_left/_robot->_F_contact[2]) > 0.8 ||
+					fabs(F_contact_plane_right/_robot->_F_contact[8]) > 0.8) {
+					is_slipping = true;
+				}
+			// } else if (left_foot_point_list.size()) {
+				// F_contact = -L_contact_left*J_c_left*robot->_M_inv*(temp_tau - gj);
+				// if (F_contact[0] > -0.1) {
+				// 	is_sticking = true;
+				// }
+				// else if (fabs(F_contact[1]/F_contact[0]) > 0.8) {
+				// 	is_slipping = true;
+				// }
+			// } else if (right_foot_point_list.size()) {
+				// F_contact = -L_contact_right*J_c_right*robot->_M_inv*(temp_tau - gj);
+				// if (F_contact[0] > -0.1) {
+				// 	is_sticking = true;
+				// }
+				// else if (fabs(F_contact[1]/F_contact[0]) > 0.8) {
+				// 	is_slipping = true;
+				// }
+			// }
+			if (is_sticking) {
+				// cout << "Exceeded normal force " << F_contact.transpose() << endl;
+				// if (left_foot_force_list.size()) {
+				// 	cout << "Actual left foot contact forces " << left_foot_force_list[0].transpose() << endl;
+				// }
+				// if (right_foot_force_list.size()) {
+				// 	cout << "Actual right foot contact forces " << right_foot_force_list[0].transpose() << endl;
+				// }
+				// tau_act.setZero(act_dof); //play safe
+				_tau_act = _tau_act_passive;
+			}
+			else if (is_slipping) {
+				// cout << "Slip detected " << F_contact.transpose() << endl;
+				// tau_act.setZero(act_dof); //play safe
+				_tau_act = _tau_act_passive;
+			}
+		// }
+		// cout << "tau_act " << endl << tau_act.transpose() << endl;
+	}
+
+	if (ret_state->_fsm_state == ToroControllerFSMState::Jumping) {
+		// start accelerating COM upwards while maintaining tension between feet
+		Eigen::Vector3d com_desired_velocity; // vx, vy, vz
+		com_desired_velocity << 0.0, 0.0, 2.0*fmin(1.0, 0.75/_robot->_feet_distance);
+		Eigen::Vector3d torso_desired_ang_v; // wx, wy, wz
+		torso_desired_ang_v << 0.0, -3.5, 0.0;
+
+		// - compute task forces
+		_robot->_com_v = _robot->_Jv_com*_robot->_dq;
+		_robot->_torso_ang_v = _robot->_Jw_torso*_robot->_dq;
+		// cout << " Desired zmp pos " << _robot->_pos_support_centroid.transpose() << endl;
+		_robot->_com_pos_err << 
+			(_robot->_com_pos[0] - _robot->_pos_support_centroid[0]),
+			(_robot->_com_pos[1] - _robot->_pos_support_centroid[1]),
+			0.0;
+		_robot->orientationError(_robot->_torso_ang_err, ret_state->_rot_torso_des, _robot->_rot_torso);
+		//TODO: ^^ here, the desired rotation should be relative to the current orientation of the body
+		// cout << "torso_ang_err " << _robot->_torso_ang_err.transpose() << endl;
+		// cout << "torso_ang_v " << _robot->_torso_ang_v.transpose() << endl;
+		Eigen::Vector3d acc_com_err = 
+			-Eigen::Vector3d(ret_state->_kplcom, ret_state->_kplcom, ret_state->_kplcom*0.5).array()*_robot->_com_pos_err.array() +
+			-Eigen::Vector3d(ret_state->_kvlcom, ret_state->_kvlcom, ret_state->_kvlcom*2.0).array()*(_robot->_com_v - com_desired_velocity).array();
+		Eigen::Vector3d acc_tor_ang_err = 
+			-ret_state->_kpacom*2.0*_robot->_torso_ang_err.array() +
+			-ret_state->_kvacom*2.0*(_robot->_torso_ang_v - torso_desired_ang_v).array();
+		Eigen::VectorXd acc_task_err(6);
+		acc_task_err << acc_com_err, acc_tor_ang_err;
+		_robot->_F_task = _robot->_L_task*(acc_task_err + _robot->_J_task*_robot->_M_inv*_robot->_N_contact_both.transpose()*_robot->_gj);
+
+		// if knee pitch exceeds a certain angle, switch to fall controller
+		if (_robot->_q[9] < 45.0/180.0*M_PI || _robot->_q[29] < 45.0/180.0*M_PI) {
+			// TODO: check thigh pitch as well?
+			ret_state->_fsm_state = ToroControllerFSMState::FallingMidAir;
+			cout << "Switching from Jumping to FallingMidAir" << endl;
+			cout << "Desired velocity was " << com_desired_velocity.transpose() << endl;
+			// cout << "Jumping: Estimated ZMP position: " << _robot->_pos_support_centroid.transpose() << endl;
+			// cout << "Jumping: Actual COM position: " << _robot->_com_pos.transpose() << endl;
+		}
+		// alternatively, when contact is lost, switch to FSMState::FallingMidAir
+		if (ret_state->_left_foot_point_list.size() == 0 && ret_state->_right_foot_point_list.size() == 0) {
+			if (ret_state->_jump_counter > ret_state->JUMP_COUNT_THRESH) {
+				ret_state->_fsm_state = ToroControllerFSMState::FallingMidAir;
+				cout << "Switching from Jumping to FallingMidAir" << endl;
+				ret_state->_balance_counter = 0;
+			}
+			else {
+				ret_state->_jump_counter++;
+			}
+		} else {
+			ret_state->_jump_counter = 0;
+		}
+
+		// _robot->_F_task = _robot->_L_task*(acc_com_err + _robot->_J_task*_robot->_M_inv*_robot->_N_contact_both.transpose()*_robot->_gj);
+		// cout << "com_v " << endl << _robot->_com_v.transpose() << endl;
+		// cout << "com_pos_err " << endl << _robot->_com_pos_err.transpose() << endl;
+		// cout << "F_task " << endl << _robot->_F_task.transpose() << endl;
+
+		// - compute required joint torques
+		_tau_act = _robot->_actuated_space_projection_contact_both.transpose()*(_robot->_J_task.transpose()*_robot->_F_task);
+		// _tau_act += _robot->_null_actuated_space_projection_contact*(_robot->_actuated_space_projection_contact_both.transpose()*_robot->_gj);
+		_tau_act += _robot->_null_actuated_space_projection_contact*(
+			_robot->_actuated_space_projection_contact_both.transpose()*_robot->_gj +
+			_robot->_actuated_space_inertia_contact_both*(
+				-ret_state->_kpj*0.1 * (_robot->_q.tail(_robot->_act_dof) - ret_state->_joint_posture_des) +
+				-ret_state->_kvj*0.3 * _robot->_dq.tail(_robot->_act_dof)
+			)
+		);
+		// tau_act = actuated_space_projection_contact_both.transpose()*( - robot->_M*kvj*(robot->_dq));
+
+		// cout << "tau_act before internal forces correction: " << tau_act.transpose() << endl;
+
+		// calculate feet stabilizing forces
+		// double des_feet_tension = ret_state->_kpfeetdistance*(_robot->_feet_distance - 0.75);
+		// cout << "des_feet_tension " << des_feet_tension << endl;
+
+		// remove moments at the feet
+		// cout << "feet_internal_force_projected_both_gravity: " << _robot->_feet_internal_force_projected_both_gravity.transpose() << endl;
+		_tau_0_rhs.head(_robot->_act_dof) = _robot->_actuated_space_inertia_contact_inv_both*_tau_act;
+		_tau_0_rhs(_robot->_act_dof) = 0 + _robot->_feet_internal_force_projected_both_gravity(0); // left foot moment x
+		_tau_0_rhs(_robot->_act_dof+1) = 0 + _robot->_feet_internal_force_projected_both_gravity(1); // left foot moment y
+		_tau_0_rhs(_robot->_act_dof+2) = 0 + _robot->_feet_internal_force_projected_both_gravity(2); // right foot moment x
+		_tau_0_rhs(_robot->_act_dof+3) = 0 + _robot->_feet_internal_force_projected_both_gravity(3); // right foot moment y
+		// _tau_0_rhs(_robot->_act_dof+4) = des_feet_tension + _robot->_feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+		_tau_0_rhs(_robot->_act_dof+4) = 0 + _robot->_feet_internal_force_projected_both_gravity(4); // internal tension between feet = 30
+		_tau_0_rhs(_robot->_act_dof+5) = 0 + _robot->_feet_internal_force_projected_both_gravity(5); // internal moment between feet = 0
+		_tau_0 = _robot->_feet_null_projector_both_inv*_tau_0_rhs;
+		// cout << "actuated_space_inertia_contact_inv_both*tau_act " << ((_robot->_actuated_space_inertia_contact_inv_both)*_tau_act).transpose() << endl;
+		// cout << "actuated_space_inertia_contact_inv_both*tau_0 " << ((_robot->_actuated_space_inertia_contact_inv_both)*_tau_0).transpose() << endl;
+		_tau_act = _tau_0;
+	}
+
+	// assemble full tau vector for simulation
+	_torques.setZero(_robot->_dof);
+	_torques.tail(_robot->_act_dof) = _tau_act;
 
 	// update control counter
 	ret_state->_controller_counter++;
 
-	// upcast and update state. This should be the last operation/
+	// update state. This should be the last operation/
 	_state->copy(ret_state);
 }
 
