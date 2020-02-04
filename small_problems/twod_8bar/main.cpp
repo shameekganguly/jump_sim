@@ -4,9 +4,11 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
-#include "model/ModelInterface.h"
-#include "graphics/ChaiGraphics.h"
-#include "simulation/Sai2Simulation.h"
+
+#include "Sai2Model.h"
+#include "Sai2Graphics.h"
+#include "Sai2Simulation.h"
+
 #include "timer/LoopTimer.h"
 
 #include <GLFW/glfw3.h> //must be loaded after loading opengl/glew as part of graphicsinterface
@@ -33,8 +35,8 @@ bool f_global_sim_pause = false; // use with caution!
 
 // simulation loop
 bool fSimulationRunning = false;
-void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
-void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
+void control(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim);
+void simulation(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim);
 
 // initialize window manager
 GLFWwindow* glfwInitialize();
@@ -55,16 +57,16 @@ int main (int argc, char** argv) {
 	cout << "Loading URDF world model file: " << robot_fname << endl;
 
 	// load graphics scene
-	auto graphics = new Graphics::ChaiGraphics(world_fname, Graphics::urdf, false);
+	auto graphics = new Sai2Graphics::Sai2Graphics(world_fname, false);
 	graphics->_world->setBackgroundColor(0.7, 0.7, 0.5);
 
 	// load robots
-	auto robot = new Model::ModelInterface(robot_fname, Model::rbdl, Model::urdf, false);
+	auto robot = new Sai2Model::Sai2Model(robot_fname, false);
 	int dof = robot->dof();
 	int actuated_dof = robot->dof() - 3; // planar
 
 	// load simulation world
-	auto sim = new Simulation::Sai2Simulation(world_fname, Simulation::urdf, false);
+	auto sim = new Simulation::Sai2Simulation(world_fname, false);
 	sim->setCollisionRestitution(0.2);
  //    // set co-efficient of friction also to zero for now as this causes jitter
     sim->setCoeffFrictionStatic(1.0);
@@ -140,7 +142,7 @@ int main (int argc, char** argv) {
 }
 
 //------------------------------------------------------------------------------
-void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
+void control(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim) {
 	// create a timer
 	LoopTimer timer;
 	timer.initializeTimer();
@@ -722,7 +724,7 @@ void control(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
 }
 
 //------------------------------------------------------------------------------
-void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
+void simulation(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim) {
 	fSimulationRunning = true;
 
 	// create a timer

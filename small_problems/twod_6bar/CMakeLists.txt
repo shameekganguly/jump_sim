@@ -1,7 +1,7 @@
 
 cmake_minimum_required (VERSION 2.8.12)
 project (HRP4JUMPS)
-SET(CMAKE_CXX_FLAGS "-std=c++11")
+SET(CMAKE_CXX_FLAGS "-std=c++11 -I/usr/include -I/usr/local/include")
 
 # set common source
 set (COMMON_SOURCE
@@ -31,6 +31,26 @@ find_package(SAI2-SIMULATION REQUIRED)
 include_directories(${SAI2-SIMULATION_INCLUDE_DIRS})
 add_definitions(${SAI2-SIMULATION_DEFINITIONS})
 
+# - SAI2-URDF. TODO: this should not be needed. something fishy.
+find_package(SAI2-URDF REQUIRED)
+include_directories(${SAI2-URDF_INCLUDE_DIRS})
+add_definitions(${SAI2-URDF_DEFINITIONS})
+
+# - SAI2-MODEL. TODO: this should not be needed. something fishy.
+find_package(SAI2-MODEL REQUIRED)
+include_directories(${SAI2-MODEL_INCLUDE_DIRS})
+add_definitions(${SAI2-MODEL_DEFINITIONS})
+
+# - SAI2-GRAPHICS. TODO: this should not be needed. something fishy.
+find_package(SAI2-GRAPHICS REQUIRED)
+include_directories(${SAI2-GRAPHICS_INCLUDE_DIRS})
+add_definitions(${SAI2-GRAPHICS_DEFINITIONS})
+
+# - SAI2-PRIMITIVES
+find_package(SAI2-PRIMITIVES REQUIRED)
+include_directories(${SAI2-PRIMITIVES_INCLUDE_DIRS})
+add_definitions(${SAI2-PRIMITIVES_DEFINITIONS})
+
 # - SAI2-COMMON
 find_package(SAI2-COMMON REQUIRED)
 include_directories(${SAI2-COMMON_INCLUDE_DIRS})
@@ -42,7 +62,12 @@ find_library(GLFW_LIBRARY glfw)
 
 set(COMMON_LIBRARIES
 	${CHAI3D_LIBARIES}
-	${SAI2-COMMON_LIBRARIES}
+	${SAI2-URDF_LIBRARIES}
+    ${SAI2-SIMULATION_LIBRARIES}
+    ${SAI2-MODEL_LIBRARIES}
+    ${SAI2-GRAPHICS_LIBRARIES}
+    ${SAI2-PRIMITIVES_LIBRARIES}
+    ${SAI2-COMMON_LIBRARIES}
 	${HIREDIS_LIBRARY}
 	${GLFW_LIBRARY}
 	)

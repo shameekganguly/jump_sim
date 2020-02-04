@@ -10,10 +10,9 @@ Date: 4/9/17
 #include <thread>
 #include <math.h>
 
-#include "model/ModelInterface.h"
-#include "model/RBDLModel.h"
-#include "graphics/ChaiGraphics.h"
-#include "simulation/Sai2Simulation.h"
+#include "Sai2Model.h"
+#include "Sai2Graphics.h"
+#include "Sai2Simulation.h"
 
 #include "timer/LoopTimer.h"
 
@@ -82,8 +81,8 @@ ForceSensorDisplay* right_foot_force_display;
 
 // simulation loop
 bool fSimulationRunning = false;
-void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulation::Sai2Simulation* sim);
-void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim);
+void control(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim);
+void simulation(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim);
 
 bool f_global_sim_pause = false; // use with caution!
 // bool f_global_sim_pause = true; // use with caution!
@@ -101,22 +100,21 @@ void keySelect(GLFWwindow* window, int key, int scancode, int action, int mods);
 MatrixXd pseudoinverse(const MatrixXd &mat, double tolerance = 1e-4);
 
 // util 
-void comPosition(Vector3d& robot_com, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names);
-void comJacobian(MatrixXd& ret_J0, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names);
+void comPosition(Vector3d& robot_com, Sai2Model::Sai2Model* robot, const std::vector<std::string> link_names);
+void comJacobian(MatrixXd& ret_J0, Sai2Model::Sai2Model* robot, const std::vector<std::string> link_names);
 
 int main (int argc, char** argv) {
 	cout << "Loading URDF world model file: " << world_fname << endl;
 
 	// load graphics scene
-	auto graphics = new Graphics::ChaiGraphics(world_fname, Graphics::urdf, false);
+	auto graphics = new Sai2Graphics::Sai2Graphics(world_fname, false);
 	graphics->_world->setBackgroundColor(0.7, 0.7, 0.5);
 
 	// load robots
-	auto robot = new Model::ModelInterface(robot_fname, Model::rbdl, Model::urdf, false);
-	auto robot_rbdl = dynamic_cast<Model::RBDLModel *>(robot->_model_internal);
+	auto robot = new Sai2Model::Sai2Model(robot_fname, false);
 
 	// load simulation world
-	auto sim = new Simulation::Sai2Simulation(world_fname, Simulation::urdf, false);
+	auto sim = new Simulation::Sai2Simulation(world_fname, false);
 	sim->setCollisionRestitution(0.0);
     // set co-efficient of friction also to zero for now as this causes jitter
     sim->setCoeffFrictionStatic(1.0);
@@ -180,13 +178,13 @@ int main (int argc, char** argv) {
 	thread sim_thread(simulation, robot, sim);
 
 	// initialize force sensor: needs Sai2Simulation sim interface type
-	left_foot_force_sensor = new ForceSensorSim(robot_name, left_foot_name, Eigen::Affine3d::Identity(), sim, robot);
+	left_foot_force_sensor = new ForceSensorSim(robot_name, left_foot_name, Eigen::Affine3d::Identity(), robot);
 	// left_foot_force_display = new ForceSensorDisplay(left_foot_force_sensor, graphics);
-	right_foot_force_sensor = new ForceSensorSim(robot_name, right_foot_name, Eigen::Affine3d::Identity(), sim, robot);
+	right_foot_force_sensor = new ForceSensorSim(robot_name, right_foot_name, Eigen::Affine3d::Identity(), robot);
 	// right_foot_force_display = new ForceSensorDisplay(right_foot_force_sensor, graphics);
 
 	// next start the control thread
-	thread ctrl_thread(control, robot, robot_rbdl, sim);
+	thread ctrl_thread(control, robot, sim);
 	
     // while window is open:
     while (!glfwWindowShouldClose(window)) {
@@ -222,7 +220,7 @@ int main (int argc, char** argv) {
 }
 
 //------------------------------------------------------------------------------
-void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulation::Sai2Simulation* sim) {
+void control(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim) {
 	// create a timer
 	LoopTimer timer;
 	timer.initializeTimer();
@@ -394,7 +392,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		// update com, zmp and foot position/velocity all the time
 		if (true) {
 			// COM position
-			comPosition(com_pos, robot_rbdl, robot->_q, link_names);
+			comPosition(com_pos, robot, link_names);
 
 			// foot positions, rotations
 			robot->position(left_foot_frame_pos_world, left_foot_name, left_foot_pos_local);
@@ -432,7 +430,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 
 			// get the task Jacobians
 			// - com Jv
-			comJacobian(J0_com, robot_rbdl, robot->_q, link_names);
+			comJacobian(J0_com, robot, link_names);
 			Jv_com = J0_com.block(0,0,3,dof);
 
 			// - Jv, Jw at feet
@@ -524,14 +522,14 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 		}
 
 		// update force sensors
-		left_foot_force_sensor->update();
+		left_foot_force_sensor->update(sim);
 		// Eigen::Vector3d left_foot_force;
 		// Eigen::Vector3d left_foot_moment;
 		// left_foot_force_sensor->getForce(left_foot_force);
 		// left_foot_force_sensor->getMoment(left_foot_moment);
 		// cout << "Left foot force: " << left_foot_moment.transpose()
 		// 		<< " Left foot moment: " << left_foot_moment.transpose() << endl;
-		right_foot_force_sensor->update();
+		right_foot_force_sensor->update(sim);
 
 		// set tau_act
 		tau_act.setZero();
@@ -539,8 +537,8 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			// calculate task errors
 			const double des_inter_foot_distance = 0.75;
 			com_zmp_x_err = pos_support_centroid[0] - com_pos[0]; //TODO: account for yaw rotation
-			robot->orientationError(left_foot_ang_err, rot_left_foot_des, rot_left_foot);
-			robot->orientationError(right_foot_ang_err, rot_right_foot_des, rot_right_foot);
+			Sai2Model::orientationError(left_foot_ang_err, rot_left_foot_des, rot_left_foot);
+			Sai2Model::orientationError(right_foot_ang_err, rot_right_foot_des, rot_right_foot);
 
 			// calculate required task force
 			fall_lin_task_err << (feet_distance - des_inter_foot_distance), com_zmp_x_err;
@@ -593,7 +591,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			torso_ang_v = Jw_torso*robot->_dq;
 			// cout << " Desired zmp pos " << pos_support_centroid.transpose() << endl;
 			com_pos_err << (com_pos[0] - pos_support_centroid[0]), (com_pos[1] - pos_support_centroid[1]), (com_pos[2] - des_com_height_balanced);
-			robot->orientationError(torso_ang_err, rot_torso_des, rot_torso);
+			Sai2Model::orientationError(torso_ang_err, rot_torso_des, rot_torso);
 			// cout << "torso_ang_err " << torso_ang_err.transpose() << endl;
 			// cout << "torso_ang_v " << torso_ang_v.transpose() << endl;
 
@@ -754,7 +752,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 			torso_ang_v = Jw_torso*robot->_dq;
 			// cout << " Desired zmp pos " << pos_support_centroid.transpose() << endl;
 			com_pos_err << (com_pos[0] - pos_support_centroid[0]), (com_pos[1] - pos_support_centroid[1]), 0.0;
-			robot->orientationError(torso_ang_err, rot_torso_des, rot_torso);
+			Sai2Model::orientationError(torso_ang_err, rot_torso_des, rot_torso);
 			//TODO: ^^ here, the desired rotation should be relative to the current orientation of the body
 			// cout << "torso_ang_err " << torso_ang_err.transpose() << endl;
 			// cout << "torso_ang_v " << torso_ang_v.transpose() << endl;
@@ -844,7 +842,7 @@ void control(Model::ModelInterface* robot, Model::RBDLModel* robot_rbdl, Simulat
 }
 
 //------------------------------------------------------------------------------
-void simulation(Model::ModelInterface* robot, Simulation::Sai2Simulation* sim) {
+void simulation(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim) {
 	fSimulationRunning = true;
 
 	// create a timer
@@ -972,7 +970,7 @@ MatrixXd pseudoinverse(const MatrixXd &mat, double tolerance) // choose appropri
 }
 
 //------------------------------------------------------------------------------
-void comPosition(Vector3d& robot_com, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names) {
+void comPosition(Vector3d& robot_com, Sai2Model::Sai2Model* robot, const std::vector<std::string> link_names) {
 	robot_com.setZero();
 	double mass;
 	double robot_mass = 0.0;
@@ -981,7 +979,7 @@ void comPosition(Vector3d& robot_com, Model::RBDLModel* robot, const Eigen::Vect
 	Matrix3d inertia;
 	for (string link_name: link_names) {
 		robot->getLinkMass(mass, center_of_mass_local, inertia, link_name);
-		robot->position(center_of_mass_world, link_name, center_of_mass_local, q);
+		robot->position(center_of_mass_world, link_name, center_of_mass_local);
 		robot_com += center_of_mass_world*mass;
 		robot_mass += mass;
 	}
@@ -989,17 +987,17 @@ void comPosition(Vector3d& robot_com, Model::RBDLModel* robot, const Eigen::Vect
 }
 
 //------------------------------------------------------------------------------
-void comJacobian(MatrixXd& ret_J0, Model::RBDLModel* robot, const Eigen::VectorXd& q, const std::vector<std::string> link_names) {
-	ret_J0.setZero(6, q.size());
+void comJacobian(MatrixXd& ret_J0, Sai2Model::Sai2Model* robot, const std::vector<std::string> link_names) {
+	ret_J0.setZero(6, robot->dof());
 	MatrixXd link_J0;
-	link_J0.setZero(6, q.size());
+	link_J0.setZero(6, robot->dof());
 	double mass;
 	double robot_mass = 0.0;
 	Vector3d center_of_mass_local;
 	Matrix3d inertia;
 	for (string link_name: link_names) {
 		robot->getLinkMass(mass, center_of_mass_local, inertia, link_name);
-		robot->J_0(link_J0, link_name, center_of_mass_local, q);
+		robot->J_0(link_J0, link_name, center_of_mass_local);
 		ret_J0 += link_J0*mass;
 		robot_mass += mass;
 	}
