@@ -79,6 +79,11 @@ public:
 		return -1;
 	}
 
+	// const access to controller
+	const WholeBodyController* controller() const {
+		return _controller;
+	}
+
 	// dtor
 	virtual ~SystemModel() {
 		delete _controller;

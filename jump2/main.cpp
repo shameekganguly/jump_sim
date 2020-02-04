@@ -105,11 +105,23 @@ int main(int argc, char** argv) {
 	glfwSetKeyCallback(window, keySelect);
 
     // while window is open:
+    auto controller = dynamic_cast<const ToroJumpController*> (toro->controller());
+    auto controller_state = dynamic_cast<ToroJumpControllerState*> (controller->_state);
     while (!glfwWindowShouldClose(window)) {
 		// update kinematic models
 		robot->_q = toro->controllerState()._q;
 		robot->updateModel();
 		//^^TODO: fix graphics glitching here probably due to non-atomic copy
+
+		// force pause if the system is unstable
+		//TODO: check instead for toro->didSystemFail() which is any way required for the optimization
+		if (
+			(controller->controllerModel()->_com_v).norm() > 2 && 
+			controller_state->_fsm_state == ToroControllerFSMState::Balancing
+		) {
+			cout << "Global pause as COM speed exceeded " << endl;
+			f_global_sim_pause = true;
+		}
 
 		// set pause state on system
 		toro->pauseIs(f_global_sim_pause);
